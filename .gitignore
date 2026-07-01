@@ -30,6 +30,7 @@ output/
 
 # Generated metadata
 *_metadata.json
+creations.json
 
 # Cache dirs
 .cache/

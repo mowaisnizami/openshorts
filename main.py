@@ -961,8 +961,24 @@ if __name__ == '__main__':
         
         if not clips_data or 'shorts' not in clips_data:
             print("❌ Failed to identify clips. Converting whole video as fallback.")
-            output_file = os.path.join(output_dir, f"{video_title}_vertical.mp4")
+            clip_filename = f"{video_title}_clip_1.mp4"
+            output_file = os.path.join(output_dir, clip_filename)
             process_video_to_vertical(input_video, output_file)
+            fallback_meta = {
+                "shorts": [{
+                    "start": 0,
+                    "end": duration,
+                    "video_title_for_youtube_short": video_title,
+                    "video_description_for_tiktok": f"Full vertical version of {video_title}",
+                    "video_description_for_instagram": f"Full vertical version of {video_title}",
+                    "viral_hook_text": video_title,
+                }],
+                "transcript": transcript,
+            }
+            metadata_file = os.path.join(output_dir, f"{video_title}_metadata.json")
+            with open(metadata_file, 'w') as f:
+                json.dump(fallback_meta, f, indent=2)
+            print(f"   Saved fallback metadata to {metadata_file}")
         else:
             print(f"🔥 Found {len(clips_data['shorts'])} viral clips!")
             

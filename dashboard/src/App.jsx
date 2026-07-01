@@ -32,7 +32,7 @@ import {
   Youtube
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
-import KeyInput from './components/KeyInput';
+import CreationsGallery from './components/CreationsGallery';
 import MediaInput from './components/MediaInput';
 import ProcessingAnimation from './components/ProcessingAnimation';
 import ResultCard from './components/ResultCard';
@@ -495,13 +495,13 @@ function App() {
           <span className="font-medium hidden lg:block">YouTube Studio</span>
         </button>
 
-        {/* <button
-          onClick={() => setActiveTab('gallery')}
-          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-colors ${activeTab === 'gallery' ? 'bg-primary/10 text-primary' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+        <button
+          onClick={() => setActiveTab('creations')}
+          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-colors ${activeTab === 'creations' ? 'bg-primary/10 text-primary' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
         >
-          <LayoutGrid size={20} />
-          <span className="font-medium hidden lg:block">Gallery</span>
-        </button> */}
+          <History size={20} />
+          <span className="font-medium hidden lg:block">Creations</span>
+        </button>
 
         <button
           onClick={() => setActiveTab('settings')}
@@ -1091,6 +1091,9 @@ function App() {
 
           {/* View: UGC Gallery */}
           {activeTab === 'ugc-gallery' && <UGCGallery />}
+
+          {/* View: Creations */}
+          {activeTab === 'creations' && <CreationsGallery />}
 
           {/* View: Thumbnails */}
           {activeTab === 'thumbnails' && (

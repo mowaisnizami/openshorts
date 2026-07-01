@@ -40,6 +40,42 @@ publish_jobs: Dict[str, Dict] = {}  # {publish_id: {status, result, error}}
 # Semester to limit concurrency to MAX_CONCURRENT_JOBS
 concurrency_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
+# Creations persistence
+CREATIONS_FILE = "creations.json"
+
+def _load_creations() -> List[Dict]:
+    if not os.path.exists(CREATIONS_FILE):
+        return []
+    try:
+        with open(CREATIONS_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None):
+    source = ""
+    for i, arg in enumerate(cmd):
+        if arg == "-u" and i + 1 < len(cmd):
+            source = cmd[i + 1]
+            break
+        if arg == "-i" and i + 1 < len(cmd):
+            source = os.path.basename(cmd[i + 1])
+            break
+    entry = {
+        "job_id": job_id,
+        "source": source,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "clips": clips,
+        "cost_analysis": cost_analysis,
+    }
+    creations = _load_creations()
+    creations.insert(0, entry)
+    try:
+        with open(CREATIONS_FILE, "w") as f:
+            json.dump(creations, f, indent=2)
+    except OSError:
+        pass
+
 def _relocate_root_job_artifacts(job_id: str, job_output_dir: str) -> bool:
     """
     Backward-compat rescue:
@@ -298,6 +334,7 @@ async def run_job(job_id, job_data):
                      clip['video_url'] = f"/videos/{job_id}/{clip_filename}"
                 
                 jobs[job_id]['result'] = {'clips': clips, 'cost_analysis': cost_analysis}
+                _save_creation(job_id, job_data['cmd'], clips, cost_analysis)
             else:
                  jobs[job_id]['status'] = 'failed'
                  jobs[job_id]['logs'].append("No metadata file generated.")
@@ -415,6 +452,22 @@ async def get_status(job_id: str):
         "logs": job['logs'],
         "result": job.get('result')
     }
+
+@app.get("/api/creations")
+async def list_creations(limit: int = 20, offset: int = 0):
+    limit = min(max(1, limit), 100)
+    creations = _load_creations()
+    total = len(creations)
+    page = creations[offset:offset + limit]
+    return {"creations": page, "has_more": (offset + limit) < total, "total": total}
+
+@app.get("/api/creations/{job_id}")
+async def get_creation(job_id: str):
+    creations = _load_creations()
+    for entry in creations:
+        if entry["job_id"] == job_id:
+            return entry
+    raise HTTPException(status_code=404, detail="Creation not found")
 
 from editor import VideoEditor
 from subtitles import generate_srt, burn_subtitles, generate_srt_from_video
