@@ -610,10 +610,13 @@ def process_video_to_vertical(input_video, final_output_video):
     print("\n   🧠 Step 2: Preparing Active Tracking...")
     original_width, original_height = get_video_resolution(input_video)
     
-    OUTPUT_HEIGHT = original_height
-    OUTPUT_WIDTH = int(OUTPUT_HEIGHT * ASPECT_RATIO)
-    if OUTPUT_WIDTH % 2 != 0:
-        OUTPUT_WIDTH += 1
+    # OUTPUT_HEIGHT = original_height
+    # OUTPUT_WIDTH = int(OUTPUT_HEIGHT * ASPECT_RATIO)
+    # if OUTPUT_WIDTH % 2 != 0:
+    #     OUTPUT_WIDTH += 1
+    # Enforce standard vertical 1080p output (1080x1920) for high quality
+    OUTPUT_WIDTH = 1080
+    OUTPUT_HEIGHT = 1920
 
     # Initialize Cameraman
     cameraman = SmoothedCameraman(OUTPUT_WIDTH, OUTPUT_HEIGHT, original_width, original_height)
