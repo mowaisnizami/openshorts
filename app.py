@@ -473,6 +473,22 @@ async def get_creation(job_id: str):
             return entry
     raise HTTPException(status_code=404, detail="Creation not found")
 
+@app.delete("/api/creations/{job_id}")
+async def delete_creation(job_id: str):
+    creations = _load_creations()
+    filtered = [e for e in creations if e["job_id"] != job_id]
+    if len(filtered) == len(creations):
+        raise HTTPException(status_code=404, detail="Creation not found")
+    try:
+        with open(CREATIONS_FILE, "w") as f:
+            json.dump(filtered, f, indent=2)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save: {e}")
+    job_path = os.path.join(OUTPUT_DIR, job_id)
+    if os.path.isdir(job_path):
+        shutil.rmtree(job_path, ignore_errors=True)
+    return {"status": "deleted"}
+
 from editor import VideoEditor
 from subtitles import generate_srt, burn_subtitles, generate_srt_from_video
 from hooks import add_hook_to_video

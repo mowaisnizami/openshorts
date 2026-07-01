@@ -5,7 +5,8 @@ import {
   ExternalLink,
   History,
   Loader2,
-  Play
+  Play,
+  Trash2
 } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { getApiUrl } from '../config';
@@ -18,7 +19,8 @@ function CreationCard({
   geminiApiKey,
   elevenLabsKey,
   uploadPostKey,
-  uploadUserId
+  uploadUserId,
+  onDelete
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -85,7 +87,19 @@ function CreationCard({
           </p>
           <p className="text-[10px] text-zinc-600">{date}</p>
         </div>
-        <div className="shrink-0 text-zinc-500">
+        <div className="shrink-0 text-zinc-500 flex items-center gap-1">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm('Delete this creation and all its clips?')) {
+                onDelete?.(creation.job_id);
+              }
+            }}
+            className="p-1.5 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+            title="Delete creation"
+          >
+            <Trash2 size={15} />
+          </button>
           {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
         </div>
       </button>
@@ -170,6 +184,18 @@ export default function CreationsGallery({
     []
   );
 
+  const handleDelete = useCallback(async (jobId) => {
+    try {
+      const res = await fetch(getApiUrl(`/api/creations/${jobId}`), {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Failed to delete');
+      setCreations((prev) => prev.filter((c) => c.job_id !== jobId));
+    } catch (err) {
+      alert('Failed to delete: ' + err.message);
+    }
+  }, []);
+
   useEffect(() => {
     fetchCreations(0, false);
   }, [fetchCreations]);
@@ -248,6 +274,7 @@ export default function CreationsGallery({
                 elevenLabsKey={elevenLabsKey}
                 uploadPostKey={uploadPostKey}
                 uploadUserId={uploadUserId}
+                onDelete={handleDelete}
               />
             ))}
           </div>
