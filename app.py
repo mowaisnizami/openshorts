@@ -52,7 +52,7 @@ def _load_creations() -> List[Dict]:
     except (json.JSONDecodeError, OSError):
         return []
 
-def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None):
+def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None, status: str = "completed"):
     source = ""
     try:
         main_idx = cmd.index("main.py")
@@ -65,15 +65,23 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
                 break
     except ValueError:
         pass
-    entry = {
-        "job_id": job_id,
-        "source": source,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "clips": clips,
-        "cost_analysis": cost_analysis,
-    }
     creations = _load_creations()
-    creations.insert(0, entry)
+    for existing in creations:
+        if existing["job_id"] == job_id:
+            existing["clips"] = clips
+            existing["status"] = status
+            if cost_analysis:
+                existing["cost_analysis"] = cost_analysis
+            break
+    else:
+        creations.insert(0, {
+            "job_id": job_id,
+            "source": source,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "clips": clips,
+            "cost_analysis": cost_analysis,
+            "status": status,
+        })
     try:
         with open(CREATIONS_FILE, "w") as f:
             json.dump(creations, f, indent=2)
@@ -270,6 +278,7 @@ async def run_job(job_id, job_data):
         
         # Async wait for process with incremental updates
         start_wait = time.time()
+        last_clip_count = 0
         while process.poll() is None:
             await asyncio.sleep(2)
             
@@ -300,6 +309,10 @@ async def run_job(job_id, job_data):
                                  # main.py writes to temp_... then moves to final name. So presence means ready!
                                  clip['video_url'] = f"/videos/{job_id}/{clip_filename}"
                                  ready_clips.append(clip)
+                        
+                        if len(ready_clips) > last_clip_count:
+                            last_clip_count = len(ready_clips)
+                            _save_creation(job_id, job_data['cmd'], ready_clips, cost_analysis, status="processing")
                         
                         if ready_clips:
                              jobs[job_id]['result'] = {'clips': ready_clips, 'cost_analysis': cost_analysis}
@@ -338,7 +351,7 @@ async def run_job(job_id, job_data):
                      clip['video_url'] = f"/videos/{job_id}/{clip_filename}"
                 
                 jobs[job_id]['result'] = {'clips': clips, 'cost_analysis': cost_analysis}
-                _save_creation(job_id, job_data['cmd'], clips, cost_analysis)
+                _save_creation(job_id, job_data['cmd'], clips, cost_analysis, status="completed")
             else:
                  jobs[job_id]['status'] = 'failed'
                  jobs[job_id]['logs'].append("No metadata file generated.")
@@ -641,10 +654,10 @@ class SubtitleRequest(BaseModel):
 @app.get("/api/clip/{job_id}/{clip_index}/transcript")
 async def get_clip_transcript(job_id: str, clip_index: int):
     """Return word-level captions for a specific clip, formatted for Remotion."""
-    if job_id not in jobs:
+    output_dir = os.path.join(OUTPUT_DIR, job_id)
+    if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
 
-    output_dir = os.path.join(OUTPUT_DIR, job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
 
     if not json_files:
@@ -824,14 +837,10 @@ async def generate_effects_config(
 
 @app.post("/api/subtitle")
 async def add_subtitles(req: SubtitleRequest):
-    if req.job_id not in jobs:
+    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
+    if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
     
-    # Reload job data from disk just in case metadata was updated
-    job = jobs[req.job_id]
-    
-    # We need to access metadata.json to get the transcript
-    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
     
     if not json_files:
@@ -911,9 +920,9 @@ async def add_subtitles(req: SubtitleRequest):
         raise HTTPException(status_code=500, detail=str(e))
         
     # 3. Update Result and Metadata
-    # Update InMemory Jobs
-    if req.clip_index < len(job['result']['clips']):
-         job['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+    # Update InMemory Jobs (if still alive)
+    if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
+         jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
     
     # Update Metadata on Disk (Persistence)
     try:
@@ -945,11 +954,10 @@ class HookRequest(BaseModel):
 
 @app.post("/api/hook")
 async def add_hook(req: HookRequest):
-    if req.job_id not in jobs:
+    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
+    if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[req.job_id]
-    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
     
     if not json_files:
@@ -998,9 +1006,9 @@ async def add_hook(req: HookRequest):
         raise HTTPException(status_code=500, detail=str(e))
         
     # Update Persistence (Same logic as subtitles)
-    # Update InMemory Jobs
-    if req.clip_index < len(job['result']['clips']):
-         job['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+    # Update InMemory Jobs (if still alive)
+    if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
+         jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
     
     # Update Metadata on Disk
     try:
@@ -1039,11 +1047,10 @@ async def translate_clip(
     if not x_elevenlabs_key:
         raise HTTPException(status_code=400, detail="Missing X-ElevenLabs-Key header")
 
-    if req.job_id not in jobs:
+    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
+    if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = jobs[req.job_id]
-    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
 
     if not json_files:
@@ -1094,9 +1101,9 @@ async def translate_clip(
         print(f"❌ Translation Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Update InMemory Jobs
-    if req.clip_index < len(job['result']['clips']):
-         job['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+    # Update InMemory Jobs (if still alive)
+    if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
+         jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
 
     # Update Metadata on Disk
     try:

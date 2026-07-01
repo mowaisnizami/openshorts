@@ -185,20 +185,24 @@ export default function ResultCard({
     setEditError(null);
     try {
       if (options.remotion) {
-        // Accumulate layer and render all layers together
-        const newLayers = { ...activeLayers, subtitles: options.remotion };
-        setActiveLayers(newLayers);
-        const blobUrl = await renderInBrowser({
-          videoUrl: originalVideoUrl,
-          durationInSeconds: clipDuration,
-          subtitles: newLayers.subtitles,
-          hook: newLayers.hook,
-          effects: newLayers.effects
-        });
-        setCurrentVideoUrl(blobUrl);
-        if (videoRef.current) videoRef.current.load();
-        setShowSubtitleModal(false);
-        return;
+        try {
+          // Accumulate layer and render all layers together
+          const newLayers = { ...activeLayers, subtitles: options.remotion };
+          setActiveLayers(newLayers);
+          const blobUrl = await renderInBrowser({
+            videoUrl: originalVideoUrl,
+            durationInSeconds: clipDuration,
+            subtitles: newLayers.subtitles,
+            hook: newLayers.hook,
+            effects: newLayers.effects
+          });
+          setCurrentVideoUrl(blobUrl);
+          if (videoRef.current) videoRef.current.load();
+          setShowSubtitleModal(false);
+          return;
+        } catch (remotionErr) {
+          console.warn('Browser render failed, falling back to FFmpeg:', remotionErr);
+        }
       }
 
       // Fallback: legacy FFmpeg
