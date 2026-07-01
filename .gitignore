@@ -11,6 +11,7 @@
 .venv/
 __pycache__/
 *.pyc
+openshortsVenv
 
 # Temporary files / runtime dirs
 temp_*
