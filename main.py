@@ -490,7 +490,7 @@ def download_youtube_video(url, output_dir="."):
         'cachedir': False,
         'extractor_args': {
             'youtube': {
-                'player_client': ['tv_embed', 'android', 'mweb', 'web'],
+                'player_client': ['ios', 'android', 'mweb', 'web'],
                 'player_skip': ['webpage', 'configs'],
             }
         },
@@ -554,7 +554,7 @@ Technical Details: {str(e)}
     
     ydl_opts = {
         **_COMMON_YDL_OPTS,
-        'format': 'bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc1]+bestaudio/best[ext=mp4]/best',
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
         'outtmpl': output_template,
         'merge_output_format': 'mp4',
         'overwrites': True,
