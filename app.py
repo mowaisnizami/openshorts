@@ -54,13 +54,17 @@ def _load_creations() -> List[Dict]:
 
 def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None):
     source = ""
-    for i, arg in enumerate(cmd):
-        if arg == "-u" and i + 1 < len(cmd):
-            source = cmd[i + 1]
-            break
-        if arg == "-i" and i + 1 < len(cmd):
-            source = os.path.basename(cmd[i + 1])
-            break
+    try:
+        main_idx = cmd.index("main.py")
+        for i in range(main_idx, len(cmd) - 1):
+            if cmd[i] in ("-u", "--url") and cmd[i + 1].startswith("http"):
+                source = cmd[i + 1]
+                break
+            if cmd[i] in ("-i", "--input"):
+                source = os.path.basename(cmd[i + 1])
+                break
+    except ValueError:
+        pass
     entry = {
         "job_id": job_id,
         "source": source,

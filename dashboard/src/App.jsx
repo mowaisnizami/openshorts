@@ -1093,7 +1093,14 @@ function App() {
           {activeTab === 'ugc-gallery' && <UGCGallery />}
 
           {/* View: Creations */}
-          {activeTab === 'creations' && <CreationsGallery />}
+          {activeTab === 'creations' && (
+            <CreationsGallery
+              geminiApiKey={apiKey}
+              elevenLabsKey={elevenLabsKey}
+              uploadPostKey={uploadPostKey}
+              uploadUserId={uploadUserId}
+            />
+          )}
 
           {/* View: Thumbnails */}
           {activeTab === 'thumbnails' && (
