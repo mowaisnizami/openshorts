@@ -1,39 +1,36 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: [
-      'openshorts.app',
-      'www.openshorts.app'
-    ],
+    allowedHosts: ['openshorts.app', 'www.openshorts.app'],
     proxy: {
       '/api': {
-        target: 'http://backend:8000',
-        changeOrigin: true,
+        target: 'http://192.168.100.105:8000',
+        changeOrigin: true
       },
       '/videos': {
-        target: 'http://backend:8000',
-        changeOrigin: true,
+        target: 'http://192.168.100.105:8000',
+        changeOrigin: true
       },
       '/thumbnails': {
-        target: 'http://backend:8000',
-        changeOrigin: true,
+        target: 'http://192.168.100.105:8000',
+        changeOrigin: true
       },
       '/gallery': {
-        target: 'http://backend:8000',
-        changeOrigin: true,
+        target: 'http://192.168.100.105:8000',
+        changeOrigin: true
       },
       '/video': {
-        target: 'http://backend:8000',
-        changeOrigin: true,
+        target: 'http://192.168.100.105:8000',
+        changeOrigin: true
       },
       '/render': {
         target: 'http://renderer:3100',
-        changeOrigin: true,
+        changeOrigin: true
       }
     }
   }
-})
+});
