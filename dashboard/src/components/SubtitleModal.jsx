@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Type, Loader2 } from 'lucide-react';
+import { X, Type, Loader2, Video } from 'lucide-react';
 import { getApiUrl } from '../config';
 import RemotionPreview from './RemotionPreview';
 
@@ -28,7 +28,7 @@ const ANIMATION_OPTIONS = [
     { value: 'none', label: 'None' },
 ];
 
-export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessing, videoUrl, jobId, clipIndex, existingHook }) {
+export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessing, videoUrl, jobId, clipIndex, existingHook, onGenerateBackend, isBackendProcessing }) {
     const [position, setPosition] = useState('bottom');
     const [fontSize, setFontSize] = useState(24);
     const [fontName, setFontName] = useState('Verdana');
@@ -365,6 +365,17 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
                     >
                         {isProcessing ? <Loader2 size={20} className="animate-spin" /> : <Type size={20} />}
                         {isProcessing ? 'Generating...' : 'Generate Subtitles'}
+                    </button>
+
+                    <button
+                        onClick={() => onGenerateBackend({
+                            position, fontSize, fontName, fontColor, highlightColor, borderColor, borderWidth, bgColor, bgOpacity, animation,
+                        })}
+                        disabled={isBackendProcessing}
+                        className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 shrink-0"
+                    >
+                        {isBackendProcessing ? <Loader2 size={20} className="animate-spin" /> : <Video size={20} />}
+                        {isBackendProcessing ? 'Rendering...' : 'Render on Backend (Remotion)'}
                     </button>
                 </div>
             </div>

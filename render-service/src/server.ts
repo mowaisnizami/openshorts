@@ -42,6 +42,11 @@ const renderRequestSchema = z.object({
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
+app.use((_req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "*");
+    next();
+});
 
 const PORT = parseInt(process.env.PORT || "3100", 10);
 const OUTPUT_DIR = process.env.OUTPUT_DIR || "/output";

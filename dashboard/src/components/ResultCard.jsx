@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { getApiUrl } from '../config';
-import { renderInBrowser } from '../lib/renderInBrowser';
+import { renderInBrowser, supportsWebCodecsH264 } from '../lib/renderInBrowser';
 import HookModal from './HookModal';
 import SubtitleModal from './SubtitleModal';
 import TranslateModal from './TranslateModal';
@@ -128,16 +128,18 @@ export default function ResultCard({
         if (data.effects && data.effects.segments) {
           const newLayers = { ...activeLayers, effects: data.effects };
           setActiveLayers(newLayers);
-          const blobUrl = await renderInBrowser({
-            videoUrl: originalVideoUrl,
-            durationInSeconds: clipDuration,
-            subtitles: newLayers.subtitles,
-            hook: newLayers.hook,
-            effects: newLayers.effects
-          });
-          setCurrentVideoUrl(blobUrl);
-          if (videoRef.current) videoRef.current.load();
-          return;
+          if (await supportsWebCodecsH264()) {
+            const blobUrl = await renderInBrowser({
+              videoUrl: originalVideoUrl,
+              durationInSeconds: clipDuration,
+              subtitles: newLayers.subtitles,
+              hook: newLayers.hook,
+              effects: newLayers.effects
+            });
+            setCurrentVideoUrl(blobUrl);
+            if (videoRef.current) videoRef.current.load();
+            return;
+          }
         }
       }
 
@@ -184,9 +186,8 @@ export default function ResultCard({
     setIsSubtitling(true);
     setEditError(null);
     try {
-      if (options.remotion) {
+      if (options.remotion && (await supportsWebCodecsH264())) {
         try {
-          // Accumulate layer and render all layers together
           const newLayers = { ...activeLayers, subtitles: options.remotion };
           setActiveLayers(newLayers);
           const blobUrl = await renderInBrowser({
@@ -225,6 +226,50 @@ export default function ResultCard({
       });
 
       if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      if (data.new_video_url) {
+        setCurrentVideoUrl(getApiUrl(data.new_video_url));
+        if (videoRef.current) videoRef.current.load();
+        setShowSubtitleModal(false);
+      }
+    } catch (e) {
+      setEditError(e.message);
+      setTimeout(() => setEditError(null), 5000);
+    } finally {
+      setIsSubtitling(false);
+    }
+  };
+
+  const handleRemotionBackendSubtitle = async (options) => {
+    setIsSubtitling(true);
+    setEditError(null);
+    try {
+      const res = await fetch(getApiUrl('/api/remotion/subtitle'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job_id: jobId,
+          clip_index: index,
+          position: options.position,
+          font_size: options.fontSize,
+          font_name: options.fontName,
+          font_color: options.fontColor,
+          highlight_color: options.highlightColor,
+          border_color: options.borderColor,
+          border_width: options.borderWidth,
+          bg_color: options.bgColor,
+          bg_opacity: options.bgOpacity,
+          animation: options.animation,
+          input_filename: currentVideoUrl.split('/').pop(),
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        try { throw new Error(JSON.parse(errText).detail || errText); }
+        catch (e) { throw new Error(errText); }
+      }
+
       const data = await res.json();
       if (data.new_video_url) {
         setCurrentVideoUrl(getApiUrl(data.new_video_url));
@@ -811,6 +856,8 @@ export default function ResultCard({
         jobId={jobId}
         clipIndex={index}
         existingHook={activeLayers.hook}
+        onGenerateBackend={handleRemotionBackendSubtitle}
+        isBackendProcessing={isSubtitling}
       />
 
       <HookModal

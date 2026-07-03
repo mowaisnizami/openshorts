@@ -699,7 +699,7 @@ async def get_clip_transcript(job_id: str, clip_index: int):
 
 
 # --- Remotion Render Proxy ---
-RENDER_SERVICE_URL = os.getenv("RENDER_SERVICE_URL", "http://renderer:3100")
+RENDER_SERVICE_URL = os.getenv("RENDER_SERVICE_URL", "http://localhost:3100")
 
 @app.post("/api/render")
 async def proxy_render(request: Request):
@@ -723,6 +723,169 @@ async def proxy_render_status(render_id: str):
             return resp.json()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Render service unavailable: {e}")
+
+
+class RemotionSubtitleRequest(BaseModel):
+    job_id: str
+    clip_index: int
+    position: str = "bottom"
+    font_size: int = 24
+    font_name: str = "Verdana"
+    font_color: str = "#FFFFFF"
+    highlight_color: str = "#FFDD00"
+    border_color: str = "#000000"
+    border_width: int = 2
+    bg_color: str = "#000000"
+    bg_opacity: float = 0.0
+    animation: str = "pop"
+    input_filename: Optional[str] = None
+
+
+@app.post("/api/remotion/subtitle")
+async def remotion_subtitle(req: RemotionSubtitleRequest):
+    """Render subtitles using the Remotion render service (Puppeteer + @remotion/renderer)."""
+    output_dir = os.path.join(OUTPUT_DIR, req.job_id)
+    if not os.path.isdir(output_dir):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+    if not json_files:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+
+    with open(json_files[0], 'r') as f:
+        data = json.load(f)
+
+    transcript = data.get('transcript')
+    if not transcript:
+        raise HTTPException(status_code=400, detail="Transcript not found")
+
+    clips = data.get('shorts', [])
+    if req.clip_index >= len(clips):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    clip_data = clips[req.clip_index]
+
+    # Determine input filename
+    if req.input_filename:
+        filename = os.path.basename(req.input_filename)
+    else:
+        filename = clip_data.get('video_url', '').split('/')[-1]
+        if not filename:
+            base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
+            filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
+
+    input_path = os.path.join(output_dir, filename)
+    if not os.path.exists(input_path):
+        raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
+
+    # Extract words within clip range
+    clip_start = clip_data.get('start', 0)
+    clip_end = clip_data.get('end', 0)
+    words = []
+    for segment in transcript.get('segments', []):
+        for word_info in segment.get('words', []):
+            if word_info['end'] > clip_start and word_info['start'] < clip_end:
+                words.append({
+                    "text": word_info.get('word', '').strip(),
+                    "startMs": int(max(0, (word_info['start'] - clip_start) * 1000)),
+                    "endMs": int(max(0, (word_info['end'] - clip_start) * 1000)),
+                })
+
+    if not words:
+        raise HTTPException(status_code=400, detail="No words found for clip range")
+
+    duration_sec = clip_end - clip_start
+
+    # Build Remotion input props
+    fps = 30
+    duration_in_frames = max(1, round(duration_sec * fps))
+    video_url = f"http://localhost:8000/videos/{req.job_id}/{filename}"
+
+    remotion_props = {
+        "videoUrl": video_url,
+        "durationInFrames": duration_in_frames,
+        "fps": fps,
+        "width": 1080,
+        "height": 1920,
+        "subtitles": {
+            "captions": words,
+            "position": req.position,
+            "style": {
+                "fontFamily": req.font_name,
+                "fontSize": req.font_size * 2.2,
+                "fontColor": req.font_color,
+                "highlightColor": req.highlight_color,
+                "borderColor": req.border_color,
+                "borderWidth": req.border_width * 1.5,
+                "bgColor": req.bg_color,
+                "bgOpacity": req.bg_opacity,
+                "animation": req.animation,
+            },
+        },
+        "hook": None,
+        "effects": None,
+    }
+
+    # Submit to render service and poll for completion
+    import httpx
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.post(
+                f"{RENDER_SERVICE_URL}/render",
+                json={"jobId": req.job_id, "clipIndex": req.clip_index, "props": remotion_props},
+            )
+            if resp.status_code != 202:
+                raise HTTPException(status_code=502, detail=f"Render service error: {resp.text}")
+            render_id = resp.json().get("renderId")
+        except httpx.ConnectError:
+            raise HTTPException(status_code=502, detail="Render service not running. Start it with: cd render-service && npm run dev")
+
+        # Poll for completion (with timeout)
+        max_wait = 180  # 3 minutes max
+        poll_interval = 2
+        waited = 0
+        output_path = None
+        while waited < max_wait:
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
+            try:
+                status_resp = await client.get(f"{RENDER_SERVICE_URL}/render/{render_id}")
+                if status_resp.status_code != 200:
+                    continue
+                status_data = status_resp.json()
+                if status_data.get("status") == "done":
+                    output_path = status_data.get("outputUrl")
+                    break
+                elif status_data.get("status") == "error":
+                    raise HTTPException(status_code=500, detail=f"Render failed: {status_data.get('error', 'Unknown error')}")
+            except httpx.ConnectError:
+                raise HTTPException(status_code=502, detail="Render service disconnected during render")
+
+    if not output_path:
+        raise HTTPException(status_code=504, detail="Render timed out")
+
+    # Copy output to expected location
+    output_filename = f"remotion_subtitled_{filename}"
+    final_path = os.path.join(output_dir, output_filename)
+    shutil.copy2(output_path, final_path)
+
+    # Update metadata
+    if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
+        jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+
+    try:
+        if req.clip_index < len(clips):
+            clips[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+            data['shorts'] = clips
+            with open(json_files[0], 'w') as f:
+                json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"⚠️ Failed to update metadata.json: {e}")
+
+    return {
+        "success": True,
+        "new_video_url": f"/videos/{req.job_id}/{output_filename}",
+    }
 
 
 class EffectsGenerateRequest(BaseModel):

@@ -1,20 +1,28 @@
 import { renderMediaOnWeb } from '@remotion/web-renderer';
 import { ShortVideo } from '../remotion/compositions/ShortVideo';
 
-/**
- * Renders a Remotion composition directly in the browser using WebCodecs.
- * Returns a blob URL to the rendered MP4.
- *
- * @param {object} params
- * @param {string} params.videoUrl - Source video URL
- * @param {number} params.durationInSeconds - Video duration
- * @param {object|null} params.subtitles - SubtitleConfig
- * @param {object|null} params.hook - HookConfig
- * @param {object|null} params.effects - EffectsConfig
- * @param {function} [params.onProgress] - Progress callback (0-1)
- * @param {AbortSignal} [params.signal] - Abort signal for cancellation
- * @returns {Promise<string>} Blob URL of the rendered MP4
- */
+let webcodecsSupported = null;
+
+export async function supportsWebCodecsH264() {
+  if (webcodecsSupported !== null) return webcodecsSupported;
+  try {
+    if (typeof VideoDecoder === 'undefined' || !VideoDecoder.isConfigSupported) {
+      webcodecsSupported = false;
+      return false;
+    }
+    const result = await VideoDecoder.isConfigSupported({
+      codec: 'avc1.64001E',
+      codedWidth: 640,
+      codedHeight: 480,
+    });
+    webcodecsSupported = result.supported;
+  } catch {
+    webcodecsSupported = false;
+  }
+  return webcodecsSupported;
+}
+
+/** @returns {Promise<boolean>} */
 export async function renderInBrowser({
   videoUrl,
   durationInSeconds = 30,
