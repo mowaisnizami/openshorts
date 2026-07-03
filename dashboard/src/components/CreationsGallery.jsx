@@ -20,7 +20,8 @@ function CreationCard({
   elevenLabsKey,
   uploadPostKey,
   uploadUserId,
-  onDelete
+  onDelete,
+  onNewClip
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -130,6 +131,7 @@ function CreationCard({
                 uploadUserId={uploadUserId}
                 onPlay={() => {}}
                 onPause={() => {}}
+                onNewClip={onNewClip}
               />
             ))}
           </div>
@@ -183,6 +185,17 @@ export default function CreationsGallery({
     },
     []
   );
+
+  const handleNewClip = useCallback(async (jobId) => {
+    try {
+      const res = await fetch(getApiUrl(`/api/creations/${jobId}`));
+      if (!res.ok) throw new Error('Failed to fetch');
+      const updated = await res.json();
+      setCreations((prev) => prev.map((c) => (c.job_id === jobId ? updated : c)));
+    } catch (err) {
+      console.error('Failed to refresh creation:', err);
+    }
+  }, []);
 
   const handleDelete = useCallback(async (jobId) => {
     try {
@@ -275,6 +288,7 @@ export default function CreationsGallery({
                 uploadPostKey={uploadPostKey}
                 uploadUserId={uploadUserId}
                 onDelete={handleDelete}
+                onNewClip={handleNewClip}
               />
             ))}
           </div>

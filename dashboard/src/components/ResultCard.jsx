@@ -31,7 +31,9 @@ export default function ResultCard({
   geminiApiKey,
   elevenLabsKey,
   onPlay,
-  onPause
+  onPause,
+  showActions = true,
+  onNewClip
 }) {
   const [showModal, setShowModal] = useState(false);
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
@@ -272,9 +274,22 @@ export default function ResultCard({
 
       const data = await res.json();
       if (data.new_video_url) {
-        setCurrentVideoUrl(getApiUrl(data.new_video_url));
-        if (videoRef.current) videoRef.current.load();
+        try {
+          const downloadRes = await fetch(getApiUrl(data.new_video_url));
+          if (downloadRes.ok) {
+            const blob = await downloadRes.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `subtitled-clip-${index + 1}.mp4`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+          }
+        } catch (dlErr) {
+          console.warn('Download failed:', dlErr);
+        }
         setShowSubtitleModal(false);
+        onNewClip?.(jobId);
       }
     } catch (e) {
       setEditError(e.message);
@@ -505,6 +520,11 @@ export default function ResultCard({
           <span className="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-white/10 uppercase tracking-wide">
             Clip {index + 1}
           </span>
+          {clip.derived && (
+            <span className="bg-purple-600/80 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-purple-400/30 uppercase tracking-wide">
+              Subtitle Render
+            </span>
+          )}
         </div>
 
         {/* Auto Edit Overlay if Processing */}
@@ -580,95 +600,97 @@ export default function ResultCard({
         )}
 
         {/* Actions Footer */}
-        <div className="grid grid-cols-2 gap-3 mt-auto pt-4 border-t border-white/5">
-          <button
-            onClick={handleAutoEdit}
-            disabled={isEditing}
-            className="col-span-1 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-purple-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
-          >
-            {isEditing ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Wand2 size={14} />
-            )}
-            {isEditing ? 'Editing...' : 'Auto Edit'}
-          </button>
+        {showActions && (
+          <div className="grid grid-cols-2 gap-3 mt-auto pt-4 border-t border-white/5">
+            <button
+              onClick={handleAutoEdit}
+              disabled={isEditing}
+              className="col-span-1 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-purple-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
+            >
+              {isEditing ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Wand2 size={14} />
+              )}
+              {isEditing ? 'Editing...' : 'Auto Edit'}
+            </button>
 
-          <button
-            onClick={() => setShowSubtitleModal(true)}
-            disabled={isSubtitling}
-            className="col-span-1 py-2 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-orange-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
-          >
-            {isSubtitling ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Type size={14} />
-            )}
-            {isSubtitling ? 'Adding...' : 'Subtitles'}
-          </button>
+            <button
+              onClick={() => setShowSubtitleModal(true)}
+              disabled={isSubtitling}
+              className="col-span-1 py-2 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-orange-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
+            >
+              {isSubtitling ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Type size={14} />
+              )}
+              {isSubtitling ? 'Adding...' : 'Subtitles'}
+            </button>
 
-          <button
-            onClick={() => setShowHookModal(true)}
-            disabled={isHooking}
-            className="col-span-1 py-2 bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-black rounded-lg text-xs font-bold shadow-lg shadow-yellow-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
-          >
-            {isHooking ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Wand2 size={14} />
-            )}
-            {isHooking ? 'Adding...' : 'Viral Hook'}
-          </button>
+            <button
+              onClick={() => setShowHookModal(true)}
+              disabled={isHooking}
+              className="col-span-1 py-2 bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-black rounded-lg text-xs font-bold shadow-lg shadow-yellow-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
+            >
+              {isHooking ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Wand2 size={14} />
+              )}
+              {isHooking ? 'Adding...' : 'Viral Hook'}
+            </button>
 
-          <button
-            onClick={() => setShowTranslateModal(true)}
-            disabled={isTranslating}
-            className="col-span-1 py-2 bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-400 hover:to-teal-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-green-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
-          >
-            {isTranslating ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Languages size={14} />
-            )}
-            {isTranslating ? 'Translating...' : 'Dub Voice'}
-          </button>
+            <button
+              onClick={() => setShowTranslateModal(true)}
+              disabled={isTranslating}
+              className="col-span-1 py-2 bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-400 hover:to-teal-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-green-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 mb-1 truncate px-1"
+            >
+              {isTranslating ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Languages size={14} />
+              )}
+              {isTranslating ? 'Translating...' : 'Dub Voice'}
+            </button>
 
-          <button
-            onClick={() => setShowModal(true)}
-            className="col-span-1 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-primary/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 truncate px-2"
-          >
-            <Share2 size={14} className="shrink-0" /> Post
-          </button>
-          <button
-            onClick={async (e) => {
-              e.preventDefault();
-              try {
-                const response = await fetch(currentVideoUrl);
-                if (!response.ok) throw new Error('Download failed');
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = `clip-${index + 1}.mp4`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-              } catch (err) {
-                console.error('Download error:', err);
-                window.open(currentVideoUrl, '_blank');
-              }
-            }}
-            className="col-span-1 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 border border-white/5 truncate px-2"
-          >
-            <Download size={14} className="shrink-0" /> Download
-          </button>
-        </div>
+            <button
+              onClick={() => setShowModal(true)}
+              className="col-span-1 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-primary/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 truncate px-2"
+            >
+              <Share2 size={14} className="shrink-0" /> Post
+            </button>
+            <button
+              onClick={async (e) => {
+                e.preventDefault();
+                try {
+                  const response = await fetch(currentVideoUrl);
+                  if (!response.ok) throw new Error('Download failed');
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.style.display = 'none';
+                  a.href = url;
+                  a.download = `clip-${index + 1}.mp4`;
+                  document.body.appendChild(a);
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                  document.body.removeChild(a);
+                } catch (err) {
+                  console.error('Download error:', err);
+                  window.open(currentVideoUrl, '_blank');
+                }
+              }}
+              className="col-span-1 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 border border-white/5 truncate px-2"
+            >
+              <Download size={14} className="shrink-0" /> Download
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Post Modal */}
-      {showModal && (
+      {showActions && showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-[#121214] border border-white/10 p-6 rounded-2xl w-full max-w-md shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar">
             <button
@@ -847,38 +869,40 @@ export default function ResultCard({
         </div>
       )}
 
-      <SubtitleModal
-        isOpen={showSubtitleModal}
-        onClose={() => setShowSubtitleModal(false)}
-        onGenerate={handleSubtitle}
-        isProcessing={isSubtitling}
-        videoUrl={originalVideoUrl}
-        jobId={jobId}
-        clipIndex={index}
-        existingHook={activeLayers.hook}
-        onGenerateBackend={handleRemotionBackendSubtitle}
-        isBackendProcessing={isSubtitling}
-      />
+      {showActions && (<>
+        <SubtitleModal
+          isOpen={showSubtitleModal}
+          onClose={() => setShowSubtitleModal(false)}
+          onGenerate={handleSubtitle}
+          isProcessing={isSubtitling}
+          videoUrl={originalVideoUrl}
+          jobId={jobId}
+          clipIndex={index}
+          existingHook={activeLayers.hook}
+          onGenerateBackend={handleRemotionBackendSubtitle}
+          isBackendProcessing={isSubtitling}
+        />
 
-      <HookModal
-        isOpen={showHookModal}
-        onClose={() => setShowHookModal(false)}
-        onGenerate={handleHook}
-        isProcessing={isHooking}
-        videoUrl={originalVideoUrl}
-        initialText={clip.viral_hook_text}
-        durationInSeconds={clip.end && clip.start ? clip.end - clip.start : 30}
-        existingSubtitles={activeLayers.subtitles}
-      />
+        <HookModal
+          isOpen={showHookModal}
+          onClose={() => setShowHookModal(false)}
+          onGenerate={handleHook}
+          isProcessing={isHooking}
+          videoUrl={originalVideoUrl}
+          initialText={clip.viral_hook_text}
+          durationInSeconds={clip.end && clip.start ? clip.end - clip.start : 30}
+          existingSubtitles={activeLayers.subtitles}
+        />
 
-      <TranslateModal
-        isOpen={showTranslateModal}
-        onClose={() => setShowTranslateModal(false)}
-        onTranslate={handleTranslate}
-        isProcessing={isTranslating}
-        videoUrl={currentVideoUrl}
-        hasApiKey={!!elevenLabsKey}
-      />
+        <TranslateModal
+          isOpen={showTranslateModal}
+          onClose={() => setShowTranslateModal(false)}
+          onTranslate={handleTranslate}
+          isProcessing={isTranslating}
+          videoUrl={currentVideoUrl}
+          hasApiKey={!!elevenLabsKey}
+        />
+      </>)}
     </div>
   );
 }

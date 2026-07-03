@@ -88,6 +88,18 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
     except OSError:
         pass
 
+def _append_clip_to_creation(job_id: str, new_clip: Dict):
+    creations = _load_creations()
+    for existing in creations:
+        if existing["job_id"] == job_id:
+            existing.setdefault("clips", []).append(new_clip)
+            break
+    try:
+        with open(CREATIONS_FILE, "w") as f:
+            json.dump(creations, f, indent=2)
+    except OSError:
+        pass
+
 def _relocate_root_job_artifacts(job_id: str, job_output_dir: str) -> bool:
     """
     Backward-compat rescue:
@@ -869,22 +881,20 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
     final_path = os.path.join(output_dir, output_filename)
     shutil.copy2(output_path, final_path)
 
-    # Update metadata
-    if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
-        jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+    # Build new clip entry with distinguishing metadata
+    new_clip = dict(clip_data)
+    new_clip["video_url"] = f"/videos/{req.job_id}/{output_filename}"
+    new_clip["derived"] = True
+    new_clip["derived_from_clip_index"] = req.clip_index
+    new_clip["derived_type"] = "remotion_subtitle"
 
-    try:
-        if req.clip_index < len(clips):
-            clips[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
-            data['shorts'] = clips
-            with open(json_files[0], 'w') as f:
-                json.dump(data, f, indent=4)
-    except Exception as e:
-        print(f"⚠️ Failed to update metadata.json: {e}")
+    # Append to creations.json
+    _append_clip_to_creation(req.job_id, new_clip)
 
     return {
         "success": True,
         "new_video_url": f"/videos/{req.job_id}/{output_filename}",
+        "new_clip": new_clip,
     }
 
 
