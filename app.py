@@ -751,6 +751,11 @@ class RemotionSubtitleRequest(BaseModel):
     bg_opacity: float = 0.0
     animation: str = "pop"
     input_filename: Optional[str] = None
+    hook_text: Optional[str] = None
+    hook_position: str = "top"
+    hook_size: str = "M"
+    hook_entrance_animation: str = "spring"
+    hook_display_duration: int = 5
 
 
 @app.post("/api/remotion/subtitle")
@@ -834,7 +839,13 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
                 "animation": req.animation,
             },
         },
-        "hook": None,
+        "hook": None if not req.hook_text else {
+            "text": req.hook_text,
+            "position": req.hook_position,
+            "size": req.hook_size,
+            "entranceAnimation": req.hook_entrance_animation,
+            "displayDurationSec": req.hook_display_duration,
+        },
         "effects": None,
     }
 
@@ -877,7 +888,8 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
         raise HTTPException(status_code=504, detail="Render timed out")
 
     # Copy output to expected location
-    output_filename = f"remotion_subtitled_{filename}"
+    has_hook = bool(req.hook_text)
+    output_filename = f"remotion_enhanced_{filename}" if has_hook else f"remotion_subtitled_{filename}"
     final_path = os.path.join(output_dir, output_filename)
     shutil.copy2(output_path, final_path)
 
@@ -886,7 +898,7 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
     new_clip["video_url"] = f"/videos/{req.job_id}/{output_filename}"
     new_clip["derived"] = True
     new_clip["derived_from_clip_index"] = req.clip_index
-    new_clip["derived_type"] = "remotion_subtitle"
+    new_clip["derived_type"] = "remotion_subtitle_hook" if has_hook else "remotion_subtitle"
 
     # Append to creations.json
     _append_clip_to_creation(req.job_id, new_clip)

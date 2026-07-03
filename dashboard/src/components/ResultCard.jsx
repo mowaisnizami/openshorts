@@ -18,7 +18,7 @@ import {
 import React, { useEffect, useState } from 'react';
 import { getApiUrl } from '../config';
 import { renderInBrowser, supportsWebCodecsH264 } from '../lib/renderInBrowser';
-import HookModal from './HookModal';
+// import HookModal from './HookModal';
 import SubtitleModal from './SubtitleModal';
 import TranslateModal from './TranslateModal';
 
@@ -56,9 +56,9 @@ export default function ResultCard({
 
   const [isEditing, setIsEditing] = useState(false);
   const [isSubtitling, setIsSubtitling] = useState(false);
-  const [isHooking, setIsHooking] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
-  const [showHookModal, setShowHookModal] = useState(false);
+  // const [isHooking, setIsHooking] = useState(false);
+  // const [showHookModal, setShowHookModal] = useState(false);
   const [showTranslateModal, setShowTranslateModal] = useState(false);
   const [editError, setEditError] = useState(null);
 
@@ -184,6 +184,7 @@ export default function ResultCard({
     }
   };
 
+  /*
   const handleSubtitle = async (options) => {
     setIsSubtitling(true);
     setEditError(null);
@@ -241,6 +242,7 @@ export default function ResultCard({
       setIsSubtitling(false);
     }
   };
+  */
 
   const handleRemotionBackendSubtitle = async (options) => {
     setIsSubtitling(true);
@@ -262,6 +264,11 @@ export default function ResultCard({
           bg_color: options.bgColor,
           bg_opacity: options.bgOpacity,
           animation: options.animation,
+          hook_text: options.hook_text || null,
+          hook_position: options.hook_position || 'top',
+          hook_size: options.hook_size || 'M',
+          hook_entrance_animation: options.hook_entrance_animation || 'spring',
+          hook_display_duration: options.hook_display_duration || 5,
           input_filename: currentVideoUrl.split('/').pop(),
         }),
       });
@@ -299,12 +306,12 @@ export default function ResultCard({
     }
   };
 
+  /*
   const handleHook = async (hookData) => {
     setIsHooking(true);
     setEditError(null);
     try {
       if (hookData.remotion) {
-        // Accumulate layer and render all layers together
         const newLayers = { ...activeLayers, hook: hookData.remotion };
         setActiveLayers(newLayers);
         const blobUrl = await renderInBrowser({
@@ -353,6 +360,7 @@ export default function ResultCard({
       setIsHooking(false);
     }
   };
+  */
 
   const handleTranslate = async (options) => {
     console.log('[Translate] Starting translation with options:', options);
@@ -625,9 +633,10 @@ export default function ResultCard({
               ) : (
                 <Type size={14} />
               )}
-              {isSubtitling ? 'Adding...' : 'Subtitles'}
+              {isSubtitling ? 'Adding...' : 'Editor'}
             </button>
 
+            {/*
             <button
               onClick={() => setShowHookModal(true)}
               disabled={isHooking}
@@ -640,6 +649,7 @@ export default function ResultCard({
               )}
               {isHooking ? 'Adding...' : 'Viral Hook'}
             </button>
+            */}
 
             <button
               onClick={() => setShowTranslateModal(true)}
@@ -873,16 +883,16 @@ export default function ResultCard({
         <SubtitleModal
           isOpen={showSubtitleModal}
           onClose={() => setShowSubtitleModal(false)}
-          onGenerate={handleSubtitle}
-          isProcessing={isSubtitling}
           videoUrl={originalVideoUrl}
           jobId={jobId}
           clipIndex={index}
-          existingHook={activeLayers.hook}
+          existingHookConfig={activeLayers.hook}
+          initialHookText={clip.viral_hook_text}
           onGenerateBackend={handleRemotionBackendSubtitle}
           isBackendProcessing={isSubtitling}
         />
 
+        {/*
         <HookModal
           isOpen={showHookModal}
           onClose={() => setShowHookModal(false)}
@@ -893,6 +903,7 @@ export default function ResultCard({
           durationInSeconds={clip.end && clip.start ? clip.end - clip.start : 30}
           existingSubtitles={activeLayers.subtitles}
         />
+        */}
 
         <TranslateModal
           isOpen={showTranslateModal}

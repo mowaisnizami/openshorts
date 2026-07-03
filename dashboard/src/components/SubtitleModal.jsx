@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Type, Loader2, Video } from 'lucide-react';
+import { X, Type, Loader2, Video, Sparkles, MoveVertical, Maximize, Zap } from 'lucide-react';
 import { getApiUrl } from '../config';
 import RemotionPreview from './RemotionPreview';
 
@@ -28,7 +28,7 @@ const ANIMATION_OPTIONS = [
     { value: 'none', label: 'None' },
 ];
 
-export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessing, videoUrl, jobId, clipIndex, existingHook, onGenerateBackend, isBackendProcessing }) {
+export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIndex, existingHookConfig, initialHookText, onGenerateBackend, isBackendProcessing }) {
     const [position, setPosition] = useState('bottom');
     const [fontSize, setFontSize] = useState(24);
     const [fontName, setFontName] = useState('Verdana');
@@ -40,6 +40,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
     const [bgOpacity, setBgOpacity] = useState(0.0);
     const [animation, setAnimation] = useState('pop');
     const [showTextEditor, setShowTextEditor] = useState(false);
+    const [subtitleEnabled, setSubtitleEnabled] = useState(true);
+    const [hookEnabled, setHookEnabled] = useState(false);
 
     // Remotion preview state
     const [captions, setCaptions] = useState([]);
@@ -48,6 +50,24 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
     const [durationSec, setDurationSec] = useState(30);
     const [captionsLoading, setCaptionsLoading] = useState(false);
     const [useRemotionPreview, setUseRemotionPreview] = useState(false);
+
+    // Hook state
+    const [hookText, setHookText] = useState('');
+    const [hookPosition, setHookPosition] = useState('top');
+    const [hookSize, setHookSize] = useState('M');
+    const [hookEntranceAnimation, setHookEntranceAnimation] = useState('spring');
+    const [hookDisplayDuration, setHookDisplayDuration] = useState(5);
+
+    // Initialize hook state when modal opens
+    useEffect(() => {
+        if (isOpen) {
+            setHookText(existingHookConfig?.text || initialHookText || 'POV: You are using the viral hook feature');
+            setHookPosition(existingHookConfig?.position || 'top');
+            setHookSize(existingHookConfig?.size || 'M');
+            setHookEntranceAnimation(existingHookConfig?.entranceAnimation || 'spring');
+            setHookDisplayDuration(existingHookConfig?.displayDurationSec || 5);
+        }
+    }, [isOpen, existingHookConfig, initialHookText]);
 
     // Fetch word-level captions when modal opens
     useEffect(() => {
@@ -96,12 +116,12 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
     if (!isOpen) return null;
 
     // Build subtitle config for Remotion
-    const subtitleConfig = {
+    const subtitleConfig = subtitleEnabled ? {
         captions,
         position,
         style: {
             fontFamily: fontName,
-            fontSize: fontSize * 2.2, // Scale up for 1080p (modal fontSize is for small preview)
+            fontSize: fontSize * 2.2,
             fontColor,
             highlightColor,
             borderColor,
@@ -110,7 +130,15 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
             bgOpacity,
             animation,
         },
-    };
+    } : null;
+
+    const hookConfig = hookEnabled && hookText ? {
+        text: hookText,
+        position: hookPosition,
+        size: hookSize,
+        entranceAnimation: hookEntranceAnimation,
+        displayDurationSec: hookDisplayDuration,
+    } : null;
 
     // Fallback: static CSS preview (same as original)
     const bw = Math.max(borderWidth, 0);
@@ -163,7 +191,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
                             videoUrl={videoUrl}
                             durationInSeconds={durationSec}
                             subtitles={subtitleConfig}
-                            hook={existingHook || null}
+                            hook={hookConfig}
                         />
                     ) : (
                         <>
@@ -185,10 +213,14 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
                 <div className="w-full md:w-80 flex flex-col">
                     <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2 shrink-0">
                         <Type className="text-primary" /> Auto Subtitles
+                        <label className="relative inline-flex items-center cursor-pointer ml-auto">
+                            <input type="checkbox" checked={subtitleEnabled} onChange={(e) => setSubtitleEnabled(e.target.checked)} className="sr-only peer" />
+                            <div className="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                        </label>
                     </h3>
 
                     <div className="space-y-5 flex-1 overflow-y-auto custom-scrollbar pr-1">
-                        {/* Position Selector */}
+                        {subtitleEnabled && (<>
                         <div>
                             <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Position</label>
                             <div className="grid grid-cols-3 gap-2">
@@ -349,15 +381,126 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
                                             </div>
                                         </div>
                                     </div>
+                            </div>
+                        )}
+                    </div>
+                        </>)}
+
+                    {/* --- Viral Hook Section --- */}
+                    <div className="border-t border-white/10 pt-5">
+                        <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                            <Sparkles size={16} className="text-yellow-400" /> Viral Hook
+                            <label className="relative inline-flex items-center cursor-pointer ml-auto">
+                                <input type="checkbox" checked={hookEnabled} onChange={(e) => setHookEnabled(e.target.checked)} className="sr-only peer" />
+                                <div className="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+                            </label>
+                        </h4>
+                        {hookEnabled && (
+                        <div className="space-y-5">
+                            {/* Hook Text Input */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 block">Text</label>
+                                <textarea
+                                    value={hookText}
+                                    onChange={(e) => setHookText(e.target.value)}
+                                    rows={3}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-500/50 resize-none font-serif"
+                                    placeholder="Enter text that will stop the scroll..."
+                                />
+                            </div>
+
+                            {/* Hook Position */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <MoveVertical size={12} /> Position
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {['top', 'center', 'bottom'].map((pos) => (
+                                        <button
+                                            key={pos}
+                                            onClick={() => setHookPosition(pos)}
+                                            className={`py-2 px-1 rounded-lg text-xs font-bold capitalize transition-all border ${hookPosition === pos
+                                                ? 'bg-white text-black border-white'
+                                                : 'bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {pos}
+                                        </button>
+                                    ))}
                                 </div>
-                            )}
-                        </div>
+                            </div>
+
+                            {/* Hook Size */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <Maximize size={12} /> Size
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {['S', 'M', 'L'].map((sz) => (
+                                        <button
+                                            key={sz}
+                                            onClick={() => setHookSize(sz)}
+                                            className={`py-2 px-1 rounded-lg text-xs font-bold transition-all border ${hookSize === sz
+                                                ? 'bg-white text-black border-white'
+                                                : 'bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {sz === 'S' ? 'Small' : sz === 'M' ? 'Medium' : 'Large'}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Hook Entrance Animation */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <Zap size={12} /> Entrance
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                        { value: 'spring', label: 'Bounce' },
+                                        { value: 'fade', label: 'Fade' },
+                                        { value: 'slide-up', label: 'Slide Up' },
+                                        { value: 'none', label: 'None' },
+                                    ].map((opt) => (
+                                        <button
+                                            key={opt.value}
+                                            onClick={() => setHookEntranceAnimation(opt.value)}
+                                            className={`py-2 px-1 rounded-lg text-xs font-bold transition-all border ${hookEntranceAnimation === opt.value
+                                                ? 'bg-white text-black border-white'
+                                                : 'bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Hook Display Duration */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Duration: {hookDisplayDuration}s</label>
+                                <input
+                                    type="range"
+                                    min="2"
+                                    max="15"
+                                    value={hookDisplayDuration}
+                                    onChange={(e) => setHookDisplayDuration(parseInt(e.target.value))}
+                                    className="w-full accent-yellow-500"
+                                />
+                                <div className="flex justify-between text-[10px] text-zinc-500">
+                                    <span>2s</span>
+                                    <span>15s</span>
+                                </div>
+                            </div>
+                        </div>)}
+                    </div>
                     </div>
 
+                    {/*
                     <button
                         onClick={() => onGenerate({
                             position, fontSize, fontName, fontColor, borderColor, borderWidth, bgColor, bgOpacity,
-                            // Remotion data
                             remotion: useRemotionPreview ? subtitleConfig : null,
                         })}
                         disabled={isProcessing}
@@ -366,10 +509,13 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, isProcessin
                         {isProcessing ? <Loader2 size={20} className="animate-spin" /> : <Type size={20} />}
                         {isProcessing ? 'Generating...' : 'Generate Subtitles'}
                     </button>
+                    */}
 
                     <button
                         onClick={() => onGenerateBackend({
                             position, fontSize, fontName, fontColor, highlightColor, borderColor, borderWidth, bgColor, bgOpacity, animation,
+                            ...(subtitleEnabled ? {} : { skip_subtitles: true }),
+                            hook_text: hookEnabled ? (hookText || null) : null, hook_position: hookPosition, hook_size: hookSize, hook_entrance_animation: hookEntranceAnimation, hook_display_duration: hookDisplayDuration,
                         })}
                         disabled={isBackendProcessing}
                         className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 shrink-0"
