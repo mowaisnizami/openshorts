@@ -26,7 +26,7 @@ const DEFAULT_PROPS: ShortVideoProps = {
       { text: "level", startMs: 4700, endMs: 5100 },
       { text: "highlighting", startMs: 5100, endMs: 6000 },
     ],
-    position: "bottom",
+    position: 0,
     style: {
       fontFamily: "Arial",
       fontSize: 52,

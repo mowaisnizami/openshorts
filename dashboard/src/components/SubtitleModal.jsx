@@ -29,7 +29,7 @@ const ANIMATION_OPTIONS = [
 ];
 
 export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIndex, existingHookConfig, initialHookText, onGenerateBackend, isBackendProcessing }) {
-    const [position, setPosition] = useState('bottom');
+    const [position, setPosition] = useState(0);
     const [fontSize, setFontSize] = useState(24);
     const [fontName, setFontName] = useState('Verdana');
     const [fontColor, setFontColor] = useState('#FFFFFF');
@@ -224,11 +224,8 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
                     ) : (
                         <>
                             <video src={videoUrl} className="w-full h-full object-contain opacity-50" muted playsInline />
-                            <div className={`absolute w-full px-8 text-center transition-all duration-300 pointer-events-none flex flex-col items-center justify-center
-                                ${position === 'top' ? 'top-20' : ''}
-                                ${position === 'middle' ? 'top-0 bottom-0' : ''}
-                                ${position === 'bottom' ? 'bottom-20' : ''}
-                            `}>
+                            <div className="absolute w-full px-8 text-center transition-all duration-300 pointer-events-none flex flex-col items-center justify-center"
+                                style={{ top: `${position}%` }}>
                                 <span style={fallbackPreviewStyle}>
                                     This is how your subtitles<br/>will appear on the video
                                 </span>
@@ -250,17 +247,18 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
                     <div className="space-y-5 flex-1 overflow-y-auto custom-scrollbar pr-1">
                         {subtitleEnabled && (<>
                         <div>
-                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Position</label>
-                            <div className="grid grid-cols-3 gap-2">
-                                {['top', 'middle', 'bottom'].map((pos) => (
-                                    <button
-                                        key={pos}
-                                        onClick={() => setPosition(pos)}
-                                        className={`p-2 rounded-lg border text-center text-xs font-medium transition-all ${position === pos ? 'bg-primary/20 border-primary text-white' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10'}`}
-                                    >
-                                        {pos.charAt(0).toUpperCase() + pos.slice(1)}
-                                    </button>
-                                ))}
+                            <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Position: {position} (0 = Bottom, 100 = Top)</label>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={position}
+                                onChange={(e) => setPosition(parseInt(e.target.value))}
+                                className="w-full accent-primary"
+                            />
+                            <div className="flex justify-between text-[10px] text-zinc-500">
+                                <span>Bottom</span>
+                                <span>Top</span>
                             </div>
                         </div>
 

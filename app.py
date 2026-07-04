@@ -740,7 +740,7 @@ async def proxy_render_status(render_id: str):
 class RemotionSubtitleRequest(BaseModel):
     job_id: str
     clip_index: int
-    position: str = "bottom"
+    position: float = 0.0
     font_size: int = 24
     font_name: str = "Verdana"
     font_color: str = "#FFFFFF"

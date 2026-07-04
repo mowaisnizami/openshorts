@@ -9,7 +9,7 @@ export interface CaptionWord {
 
 // --- Subtitle config ---
 export type SubtitleAnimation = "none" | "word-highlight" | "pop" | "karaoke";
-export type SubtitlePosition = "top" | "middle" | "bottom";
+export type SubtitlePosition = number;
 
 export interface SubtitleStyle {
   fontFamily: string;
@@ -106,7 +106,7 @@ export const subtitleStyleSchema = z.object({
 
 export const subtitleConfigSchema = z.object({
   captions: z.array(captionWordSchema),
-  position: z.enum(["top", "middle", "bottom"]),
+  position: z.number().min(0).max(100),
   style: subtitleStyleSchema,
 });
 

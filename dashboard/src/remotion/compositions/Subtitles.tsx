@@ -1,24 +1,22 @@
-import React from "react";
+import React from 'react';
 import {
   AbsoluteFill,
-  Sequence,
-  useCurrentFrame,
-  useVideoConfig,
-  spring,
   interpolate,
-} from "remotion";
-import type { SubtitleConfig } from "../lib/types";
-import { groupCaptionsIntoBlocks, getActiveWordIndex } from "../lib/captions";
-import { getFontStack } from "../lib/fonts";
+  Sequence,
+  spring,
+  useCurrentFrame,
+  useVideoConfig
+} from 'remotion';
+import { getActiveWordIndex, groupCaptionsIntoBlocks } from '../lib/captions';
+import { getFontStack } from '../lib/fonts';
+import type { SubtitleConfig } from '../lib/types';
 
 interface SubtitlesProps {
   config: SubtitleConfig;
 }
 
-const POSITION_MAP: Record<string, React.CSSProperties> = {
-  top: { top: "12%", bottom: "auto" },
-  middle: { top: "45%", bottom: "auto" },
-  bottom: { bottom: "10%", top: "auto" },
+const getPositionStyle = (pos: number): React.CSSProperties => {
+  return { top: 'auto', bottom: `${pos}%` };
 };
 
 export const Subtitles: React.FC<SubtitlesProps> = ({ config }) => {
@@ -62,7 +60,7 @@ interface SubtitleBlockProps {
 const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
   block,
   config,
-  blockStartMs,
+  blockStartMs
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -72,7 +70,7 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
   const currentTimeMs = blockStartMs + (frame / fps) * 1000;
   const activeIndex = getActiveWordIndex(block.words, currentTimeMs);
 
-  const positionStyle = POSITION_MAP[position] ?? POSITION_MAP.bottom;
+  const positionStyle = getPositionStyle(position);
   const fontStack = getFontStack(style.fontFamily);
 
   // Background box style
@@ -81,31 +79,31 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
     ? {
         backgroundColor: `${style.bgColor}${Math.round(style.bgOpacity * 255)
           .toString(16)
-          .padStart(2, "0")}`,
+          .padStart(2, '0')}`,
         borderRadius: 8,
-        padding: "8px 16px",
+        padding: '8px 16px'
       }
     : {};
 
   return (
     <div
       style={{
-        position: "absolute",
+        position: 'absolute',
         left: 0,
         right: 0,
-        display: "flex",
-        justifyContent: "center",
-        ...positionStyle,
+        display: 'flex',
+        justifyContent: 'center',
+        ...positionStyle
       }}
     >
       <div
         style={{
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "center",
-          gap: "6px 8px",
-          maxWidth: "85%",
-          ...bgStyle,
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: '6px 8px',
+          maxWidth: '85%',
+          ...bgStyle
         }}
       >
         {block.words.map((word, i) => (
@@ -130,9 +128,9 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
 interface WordSpanProps {
   word: string;
   isActive: boolean;
-  style: SubtitleConfig["style"];
+  style: SubtitleConfig['style'];
   fontStack: string;
-  animation: SubtitleConfig["style"]["animation"];
+  animation: SubtitleConfig['style']['animation'];
   frame: number;
   fps: number;
   wordStartMs: number;
@@ -148,13 +146,13 @@ const WordSpan: React.FC<WordSpanProps> = ({
   frame,
   fps,
   wordStartMs,
-  blockStartMs,
+  blockStartMs
 }) => {
   const wordStartFrame = Math.round(
     ((wordStartMs - blockStartMs) / 1000) * fps
   );
 
-  let transform = "";
+  let transform = '';
   let color = style.fontColor;
   let extraStyle: React.CSSProperties = {};
 
@@ -162,29 +160,29 @@ const WordSpan: React.FC<WordSpanProps> = ({
     color = style.highlightColor;
 
     switch (animation) {
-      case "pop": {
+      case 'pop': {
         const scale = spring({
           frame: frame - wordStartFrame,
           fps,
           config: { mass: 0.5, stiffness: 300, damping: 12 },
-          durationInFrames: 10,
+          durationInFrames: 10
         });
         const scaleValue = interpolate(scale, [0, 1], [1, 1.25]);
         transform = `scale(${scaleValue})`;
         break;
       }
-      case "karaoke": {
+      case 'karaoke': {
         extraStyle = {
           backgroundColor: style.highlightColor,
-          color: style.bgColor || "#000000",
+          color: style.bgColor || '#000000',
           borderRadius: 4,
-          padding: "2px 6px",
+          padding: '2px 6px'
         };
         break;
       }
-      case "word-highlight": {
+      case 'word-highlight': {
         extraStyle = {
-          textShadow: `0 0 12px ${style.highlightColor}, 0 0 24px ${style.highlightColor}40`,
+          textShadow: `0 0 12px ${style.highlightColor}, 0 0 24px ${style.highlightColor}40`
         };
         break;
       }
@@ -200,9 +198,9 @@ const WordSpan: React.FC<WordSpanProps> = ({
           `${style.borderWidth}px 0 0 ${style.borderColor}`,
           `-${style.borderWidth}px 0 0 ${style.borderColor}`,
           `0 ${style.borderWidth}px 0 ${style.borderColor}`,
-          `0 -${style.borderWidth}px 0 ${style.borderColor}`,
-        ].join(", ")
-      : "none";
+          `0 -${style.borderWidth}px 0 ${style.borderColor}`
+        ].join(', ')
+      : 'none';
 
   return (
     <span
@@ -210,15 +208,15 @@ const WordSpan: React.FC<WordSpanProps> = ({
         fontFamily: fontStack,
         fontSize: style.fontSize,
         fontWeight: 700,
-        color: animation === "karaoke" && isActive ? undefined : color,
+        color: animation === 'karaoke' && isActive ? undefined : color,
         textShadow:
-          animation !== "karaoke"
-            ? [strokeShadow, extraStyle.textShadow].filter(Boolean).join(", ")
+          animation !== 'karaoke'
+            ? [strokeShadow, extraStyle.textShadow].filter(Boolean).join(', ')
             : strokeShadow,
         transform,
-        display: "inline-block",
-        transition: "none",
-        ...extraStyle,
+        display: 'inline-block',
+        transition: 'none',
+        ...extraStyle
       }}
     >
       {word}
