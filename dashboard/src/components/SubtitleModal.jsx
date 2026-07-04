@@ -669,13 +669,13 @@ export default function SubtitleModal({
                   {/* Hook Display Duration */}
                   <div>
                     <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                      Duration: {hookDisplayDuration}s
+                      Duration: {hookDisplayDuration}s / {Math.round(durationSec)}s
                     </label>
                     <input
                       type="range"
                       min="2"
-                      max="15"
-                      value={hookDisplayDuration}
+                      max={Math.ceil(durationSec)}
+                      value={Math.min(hookDisplayDuration, Math.ceil(durationSec))}
                       onChange={(e) =>
                         setHookDisplayDuration(parseInt(e.target.value))
                       }
@@ -683,7 +683,7 @@ export default function SubtitleModal({
                     />
                     <div className="flex justify-between text-[10px] text-zinc-500">
                       <span>2s</span>
-                      <span>15s</span>
+                      <span>{Math.round(durationSec)}s</span>
                     </div>
                   </div>
                 </div>
@@ -857,13 +857,13 @@ export default function SubtitleModal({
                   {/* Image Display Duration */}
                   <div>
                     <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                      Duration: {imageDisplayDuration}s
+                      Duration: {imageDisplayDuration}s / {Math.round(durationSec)}s
                     </label>
                     <input
                       type="range"
                       min="2"
-                      max="15"
-                      value={imageDisplayDuration}
+                      max={Math.ceil(durationSec)}
+                      value={Math.min(imageDisplayDuration, Math.ceil(durationSec))}
                       onChange={(e) =>
                         setImageDisplayDuration(parseInt(e.target.value))
                       }
@@ -871,7 +871,7 @@ export default function SubtitleModal({
                     />
                     <div className="flex justify-between text-[10px] text-zinc-500">
                       <span>2s</span>
-                      <span>15s</span>
+                      <span>{Math.round(durationSec)}s</span>
                     </div>
                   </div>
 
