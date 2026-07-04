@@ -43,7 +43,7 @@ export interface HookConfig {
 }
 
 // --- Image overlay config ---
-export type ImageOverlayPosition = "top" | "center" | "bottom";
+export type ImageOverlayPosition = number;
 export type ImageOverlaySize = "S" | "M" | "L";
 export type ImageOverlayEntrance = "spring" | "fade" | "slide-up" | "none";
 

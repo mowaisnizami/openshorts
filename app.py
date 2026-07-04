@@ -757,7 +757,7 @@ class RemotionSubtitleRequest(BaseModel):
     hook_entrance_animation: str = "spring"
     hook_display_duration: int = 5
     image_overlay_data: Optional[str] = None
-    image_position: str = "top"
+    image_position: float = 0.0
     image_size: str = "M"
     image_entrance_animation: str = "spring"
     image_display_duration: int = 5

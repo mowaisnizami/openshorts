@@ -20,10 +20,8 @@ const SIZE_SCALE: Record<string, number> = {
   L: 0.4,
 };
 
-const POSITION_STYLE: Record<string, React.CSSProperties> = {
-  top: { top: "10%", bottom: "auto" },
-  center: { top: "50%", bottom: "auto", transform: "translateY(-50%)" },
-  bottom: { top: "auto", bottom: "10%" },
+const getPositionStyle = (pos: number): React.CSSProperties => {
+  return { top: `${100 - pos}%`, bottom: "auto" };
 };
 
 export const ImageOverlay: React.FC<ImageOverlayProps> = ({ config }) => {
@@ -96,7 +94,7 @@ const ImageBox: React.FC<ImageBoxProps> = ({ config, displayFrames }) => {
 
   animOpacity *= config.opacity;
 
-  const positionStyle = POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
+  const positionStyle = getPositionStyle(config.position);
   const imageWidth = Math.round(width * scale);
 
   return (

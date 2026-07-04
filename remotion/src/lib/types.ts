@@ -43,7 +43,7 @@ export interface HookConfig {
 }
 
 // --- Image overlay config ---
-export type ImageOverlayPosition = "top" | "center" | "bottom";
+export type ImageOverlayPosition = number;
 export type ImageOverlaySize = "S" | "M" | "L";
 export type ImageOverlayEntrance = "spring" | "fade" | "slide-up" | "none";
 
@@ -135,7 +135,7 @@ export const effectsConfigSchema = z.object({
 
 export const imageOverlayConfigSchema = z.object({
   imageUrl: z.string(),
-  position: z.enum(["top", "center", "bottom"]),
+  position: z.number().min(0).max(100),
   size: z.enum(["S", "M", "L"]),
   entranceAnimation: z.enum(["spring", "fade", "slide-up", "none"]),
   displayDurationSec: z.number().positive(),

@@ -16,10 +16,8 @@ const SIZE_SCALE: Record<string, number> = {
   L: 0.4,
 };
 
-const POSITION_STYLE: Record<string, React.CSSProperties> = {
-  top: { top: "10%" },
-  center: { top: "50%", transform: "translateY(-50%)" },
-  bottom: { bottom: "10%" },
+const getPositionStyle = (pos: number): React.CSSProperties => {
+  return { top: `${100 - pos}%`, bottom: "auto" };
 };
 
 interface ImageBoxProps {
@@ -85,7 +83,7 @@ const ImageBox: React.FC<ImageBoxProps> = ({ config, displayFrames }) => {
         right: 0,
         display: "flex",
         justifyContent: "center",
-        ...POSITION_STYLE[config.position],
+        ...getPositionStyle(config.position),
         opacity: animOpacity,
         transform: `scale(${animScale}) translateY(${animTranslateY}px)`,
       }}

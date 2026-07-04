@@ -82,7 +82,7 @@ export default function SubtitleModal({
   const [imageEnabled, setImageEnabled] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
-  const [imagePosition, setImagePosition] = useState('top');
+  const [imagePosition, setImagePosition] = useState(0);
   const [imageSize, setImageSize] = useState('M');
   const [imageEntranceAnimation, setImageEntranceAnimation] =
     useState('spring');
@@ -738,23 +738,22 @@ export default function SubtitleModal({
 
                   {/* Image Position */}
                   <div>
-                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                      <MoveVertical size={12} /> Position
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Position: {imagePosition} (0 = Bottom, 100 = Top)
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {['top', 'center', 'bottom'].map((pos) => (
-                        <button
-                          key={pos}
-                          onClick={() => setImagePosition(pos)}
-                          className={`py-2 px-1 rounded-lg text-xs font-bold capitalize transition-all border ${
-                            imagePosition === pos
-                              ? 'bg-white text-black border-white'
-                              : 'bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10'
-                          }`}
-                        >
-                          {pos}
-                        </button>
-                      ))}
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={imagePosition}
+                      onChange={(e) =>
+                        setImagePosition(parseInt(e.target.value))
+                      }
+                      className="w-full accent-green-500"
+                    />
+                    <div className="flex justify-between text-[10px] text-zinc-500">
+                      <span>Bottom</span>
+                      <span>Top</span>
                     </div>
                   </div>
 
