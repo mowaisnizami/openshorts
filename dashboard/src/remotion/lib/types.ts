@@ -50,6 +50,7 @@ export type ImageOverlayEntrance = "spring" | "fade" | "slide-up" | "none";
 export interface ImageOverlayConfig {
   imageUrl: string;
   position: ImageOverlayPosition;
+  horizontalPosition: number;
   size: ImageOverlaySize;
   entranceAnimation: ImageOverlayEntrance;
   displayDurationSec: number;

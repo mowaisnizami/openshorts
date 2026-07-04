@@ -50,6 +50,7 @@ export type ImageOverlayEntrance = "spring" | "fade" | "slide-up" | "none";
 export interface ImageOverlayConfig {
   imageUrl: string;
   position: ImageOverlayPosition;
+  horizontalPosition: number;
   size: ImageOverlaySize;
   entranceAnimation: ImageOverlayEntrance;
   displayDurationSec: number;
@@ -136,6 +137,7 @@ export const effectsConfigSchema = z.object({
 export const imageOverlayConfigSchema = z.object({
   imageUrl: z.string(),
   position: z.number().min(0).max(100),
+  horizontalPosition: z.number().min(0).max(100),
   size: z.enum(["S", "M", "L"]),
   entranceAnimation: z.enum(["spring", "fade", "slide-up", "none"]),
   displayDurationSec: z.number().positive(),

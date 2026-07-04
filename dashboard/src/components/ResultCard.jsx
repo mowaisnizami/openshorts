@@ -271,6 +271,7 @@ export default function ResultCard({
           hook_display_duration: options.hook_display_duration || 5,
           image_overlay_data: options.image_overlay_data || null,
           image_position: options.image_position ?? 0,
+          image_horizontal_position: options.image_horizontal_position ?? 50,
           image_size: options.image_size || 'M',
           image_entrance_animation: options.image_entrance_animation || 'spring',
           image_display_duration: options.image_display_duration || 5,

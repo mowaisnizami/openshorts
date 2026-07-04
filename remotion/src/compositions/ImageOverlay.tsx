@@ -79,13 +79,10 @@ const ImageBox: React.FC<ImageBoxProps> = ({ config, displayFrames }) => {
     <div
       style={{
         position: "absolute",
-        left: 0,
-        right: 0,
-        display: "flex",
-        justifyContent: "center",
+        left: `${config.horizontalPosition}%`,
         ...getPositionStyle(config.position),
         opacity: animOpacity,
-        transform: `scale(${animScale}) translateY(${animTranslateY}px)`,
+        transform: `translateX(-${config.horizontalPosition}%) scale(${animScale}) translateY(${animTranslateY}px)`,
       }}
     >
       <Img

@@ -83,6 +83,7 @@ export default function SubtitleModal({
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const [imagePosition, setImagePosition] = useState(0);
+  const [imageHorizontalPosition, setImageHorizontalPosition] = useState(50);
   const [imageSize, setImageSize] = useState('M');
   const [imageEntranceAnimation, setImageEntranceAnimation] =
     useState('spring');
@@ -198,6 +199,7 @@ export default function SubtitleModal({
       ? {
           imageUrl: imagePreviewUrl,
           position: imagePosition,
+          horizontalPosition: imageHorizontalPosition,
           size: imageSize,
           entranceAnimation: imageEntranceAnimation,
           displayDurationSec: imageDisplayDuration,
@@ -757,6 +759,27 @@ export default function SubtitleModal({
                     </div>
                   </div>
 
+                  {/* Image Horizontal Position */}
+                  <div>
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Horizontal: {imageHorizontalPosition} (0 = Left, 100 = Right)
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={imageHorizontalPosition}
+                      onChange={(e) =>
+                        setImageHorizontalPosition(parseInt(e.target.value))
+                      }
+                      className="w-full accent-green-500"
+                    />
+                    <div className="flex justify-between text-[10px] text-zinc-500">
+                      <span>Left</span>
+                      <span>Right</span>
+                    </div>
+                  </div>
+
                   {/* Image Size */}
                   <div>
                     <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -899,6 +922,7 @@ export default function SubtitleModal({
                 hook_display_duration: hookDisplayDuration,
                 image_overlay_data: imageData,
                 image_position: imagePosition,
+                image_horizontal_position: imageHorizontalPosition,
                 image_size: imageSize,
                 image_entrance_animation: imageEntranceAnimation,
                 image_display_duration: imageDisplayDuration,

@@ -758,6 +758,7 @@ class RemotionSubtitleRequest(BaseModel):
     hook_display_duration: int = 5
     image_overlay_data: Optional[str] = None
     image_position: float = 0.0
+    image_horizontal_position: float = 50.0
     image_size: str = "M"
     image_entrance_animation: str = "spring"
     image_display_duration: int = 5
@@ -862,6 +863,7 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
             remotion_props["imageOverlay"] = {
                 "imageUrl": req.image_overlay_data,
                 "position": req.image_position,
+                "horizontalPosition": req.image_horizontal_position,
                 "size": req.image_size,
                 "entranceAnimation": req.image_entrance_animation,
                 "displayDurationSec": req.image_display_duration,
