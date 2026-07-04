@@ -101,11 +101,13 @@ const ImageBox: React.FC<ImageBoxProps> = ({ config, displayFrames }) => {
     <div
       style={{
         position: "absolute",
-        left: `${config.horizontalPosition}%`,
-        transform: `translateX(-${config.horizontalPosition}%)`,
+        left: 0,
+        right: 0,
+        display: "flex",
         ...positionStyle,
       }}
     >
+      <div style={{ width: `${config.horizontalPosition}%` }} />
       <Img
         src={config.imageUrl}
         style={{

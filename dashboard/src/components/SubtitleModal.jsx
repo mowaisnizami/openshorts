@@ -762,7 +762,7 @@ export default function SubtitleModal({
                   {/* Image Horizontal Position */}
                   <div>
                     <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                      Horizontal: {imageHorizontalPosition} (0 = Left, 100 = Right)
+                      Horizontal: {imageHorizontalPosition < 33 ? "Left" : imageHorizontalPosition > 66 ? "Right" : "Center"} ({imageHorizontalPosition})
                     </label>
                     <input
                       type="range"
