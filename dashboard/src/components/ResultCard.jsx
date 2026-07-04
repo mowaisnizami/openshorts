@@ -269,6 +269,12 @@ export default function ResultCard({
           hook_size: options.hook_size || 'M',
           hook_entrance_animation: options.hook_entrance_animation || 'spring',
           hook_display_duration: options.hook_display_duration || 5,
+          image_overlay_data: options.image_overlay_data || null,
+          image_position: options.image_position || 'top',
+          image_size: options.image_size || 'M',
+          image_entrance_animation: options.image_entrance_animation || 'spring',
+          image_display_duration: options.image_display_duration || 5,
+          image_opacity: options.image_opacity ?? 1.0,
           input_filename: currentVideoUrl.split('/').pop(),
         }),
       });

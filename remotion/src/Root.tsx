@@ -46,6 +46,7 @@ const DEFAULT_PROPS: ShortVideoProps = {
     entranceAnimation: "spring",
     displayDurationSec: 5,
   },
+  imageOverlay: null,
   effects: {
     segments: [
       {

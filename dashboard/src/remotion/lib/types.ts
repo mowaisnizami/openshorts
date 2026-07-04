@@ -42,6 +42,20 @@ export interface HookConfig {
   displayDurationSec: number;
 }
 
+// --- Image overlay config ---
+export type ImageOverlayPosition = "top" | "center" | "bottom";
+export type ImageOverlaySize = "S" | "M" | "L";
+export type ImageOverlayEntrance = "spring" | "fade" | "slide-up" | "none";
+
+export interface ImageOverlayConfig {
+  imageUrl: string;
+  position: ImageOverlayPosition;
+  size: ImageOverlaySize;
+  entranceAnimation: ImageOverlayEntrance;
+  displayDurationSec: number;
+  opacity: number;
+}
+
 // --- Effects config ---
 export interface EffectSegment {
   startSec: number;
@@ -67,6 +81,7 @@ export interface ShortVideoProps {
   height: number;
   subtitles: SubtitleConfig | null;
   hook: HookConfig | null;
+  imageOverlay: ImageOverlayConfig | null;
   effects: EffectsConfig | null;
 }
 

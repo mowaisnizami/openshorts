@@ -42,6 +42,20 @@ export interface HookConfig {
   displayDurationSec: number;
 }
 
+// --- Image overlay config ---
+export type ImageOverlayPosition = "top" | "center" | "bottom";
+export type ImageOverlaySize = "S" | "M" | "L";
+export type ImageOverlayEntrance = "spring" | "fade" | "slide-up" | "none";
+
+export interface ImageOverlayConfig {
+  imageUrl: string;
+  position: ImageOverlayPosition;
+  size: ImageOverlaySize;
+  entranceAnimation: ImageOverlayEntrance;
+  displayDurationSec: number;
+  opacity: number;
+}
+
 // --- Effects config ---
 export interface EffectSegment {
   startSec: number;
@@ -67,6 +81,7 @@ export interface ShortVideoProps {
   height: number;
   subtitles: SubtitleConfig | null;
   hook: HookConfig | null;
+  imageOverlay: ImageOverlayConfig | null;
   effects: EffectsConfig | null;
 }
 
@@ -118,6 +133,15 @@ export const effectsConfigSchema = z.object({
   segments: z.array(effectSegmentSchema),
 });
 
+export const imageOverlayConfigSchema = z.object({
+  imageUrl: z.string(),
+  position: z.enum(["top", "center", "bottom"]),
+  size: z.enum(["S", "M", "L"]),
+  entranceAnimation: z.enum(["spring", "fade", "slide-up", "none"]),
+  displayDurationSec: z.number().positive(),
+  opacity: z.number().min(0).max(1),
+});
+
 export const shortVideoPropsSchema = z.object({
   videoUrl: z.string(),
   durationInFrames: z.number().int().positive(),
@@ -126,5 +150,6 @@ export const shortVideoPropsSchema = z.object({
   height: z.number().int().positive(),
   subtitles: subtitleConfigSchema.nullable(),
   hook: hookConfigSchema.nullable(),
+  imageOverlay: imageOverlayConfigSchema.nullable(),
   effects: effectsConfigSchema.nullable(),
 });

@@ -19,6 +19,7 @@ export default function RemotionPreview({
     durationInSeconds = 30,
     subtitles = null,
     hook = null,
+    imageOverlay = null,
     effects = null,
     className = '',
 }) {
@@ -34,9 +35,10 @@ export default function RemotionPreview({
             height: 1920,
             subtitles,
             hook,
+            imageOverlay,
             effects,
         }),
-        [videoUrl, durationInFrames, subtitles, hook, effects]
+        [videoUrl, durationInFrames, subtitles, hook, imageOverlay, effects]
     );
 
     return (

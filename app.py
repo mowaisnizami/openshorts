@@ -756,6 +756,12 @@ class RemotionSubtitleRequest(BaseModel):
     hook_size: str = "M"
     hook_entrance_animation: str = "spring"
     hook_display_duration: int = 5
+    image_overlay_data: Optional[str] = None
+    image_position: str = "top"
+    image_size: str = "M"
+    image_entrance_animation: str = "spring"
+    image_display_duration: int = 5
+    image_opacity: float = 1.0
 
 
 @app.post("/api/remotion/subtitle")
@@ -846,8 +852,23 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
             "entranceAnimation": req.hook_entrance_animation,
             "displayDurationSec": req.hook_display_duration,
         },
+        "imageOverlay": None,
         "effects": None,
     }
+
+    # Handle image overlay upload
+    if req.image_overlay_data:
+        try:
+            remotion_props["imageOverlay"] = {
+                "imageUrl": req.image_overlay_data,
+                "position": req.image_position,
+                "size": req.image_size,
+                "entranceAnimation": req.image_entrance_animation,
+                "displayDurationSec": req.image_display_duration,
+                "opacity": req.image_opacity,
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid image data: {str(e)}")
 
     # Submit to render service and poll for completion
     import httpx
@@ -889,7 +910,8 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
 
     # Copy output to expected location
     has_hook = bool(req.hook_text)
-    output_filename = f"remotion_enhanced_{filename}" if has_hook else f"remotion_subtitled_{filename}"
+    has_image = bool(req.image_overlay_data)
+    output_filename = f"remotion_enhanced_{filename}" if (has_hook or has_image) else f"remotion_subtitled_{filename}"
     final_path = os.path.join(output_dir, output_filename)
     shutil.copy2(output_path, final_path)
 
@@ -898,7 +920,14 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
     new_clip["video_url"] = f"/videos/{req.job_id}/{output_filename}"
     new_clip["derived"] = True
     new_clip["derived_from_clip_index"] = req.clip_index
-    new_clip["derived_type"] = "remotion_subtitle_hook" if has_hook else "remotion_subtitle"
+    derived_types = []
+    if has_hook:
+        derived_types.append("hook")
+    if has_image:
+        derived_types.append("overlay")
+    if not derived_types:
+        derived_types.append("subtitle")
+    new_clip["derived_type"] = "remotion_" + "_".join(derived_types)
 
     # Append to creations.json
     _append_clip_to_creation(req.job_id, new_clip)

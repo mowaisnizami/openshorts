@@ -16,6 +16,7 @@ export interface RenderParams {
     height: number;
     subtitles: unknown;
     hook: unknown;
+    imageOverlay: unknown;
     effects: unknown;
   };
 }
@@ -70,6 +71,7 @@ export async function executeRender(params: RenderParams): Promise<void> {
       serveUrl: bundleLocation,
       codec: "h264",
       crf: 22,
+      inputProps: props,
       outputLocation,
       onProgress: ({ progress }) => {
         const percent = Math.round(progress * 100);

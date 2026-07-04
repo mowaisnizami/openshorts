@@ -34,6 +34,7 @@ const renderRequestSchema = z.object({
     height: z.number().int().positive(),
     subtitles: z.any().nullable().optional(),
     hook: z.any().nullable().optional(),
+    imageOverlay: z.any().nullable().optional(),
     effects: z.any().nullable().optional(),
   }),
 });
@@ -97,6 +98,19 @@ app.post("/render", (req, res) => {
     console.log(`[render] Resolved video URL: ${props.videoUrl} -> ${resolvedVideoUrl}`);
   }
 
+  // Resolve image overlay URL similarly
+  let resolvedImageOverlay = props.imageOverlay ?? null;
+  if (resolvedImageOverlay?.imageUrl) {
+    const imgPathMatch = resolvedImageOverlay.imageUrl.match(/\/videos\/([^/]+)\/(.+)$/);
+    if (imgPathMatch) {
+      resolvedImageOverlay = {
+        ...resolvedImageOverlay,
+        imageUrl: `http://localhost:${PORT}/output/${imgPathMatch[1]}/${imgPathMatch[2]}`,
+      };
+      console.log(`[render] Resolved image overlay URL: ${props.imageOverlay.imageUrl} -> ${resolvedImageOverlay.imageUrl}`);
+    }
+  }
+
   // Fire and forget - render runs in background
   executeRender({
     renderId,
@@ -110,6 +124,7 @@ app.post("/render", (req, res) => {
       height: props.height,
       subtitles: props.subtitles ?? null,
       hook: props.hook ?? null,
+      imageOverlay: resolvedImageOverlay,
       effects: props.effects ?? null,
     },
   }).catch((err) => {

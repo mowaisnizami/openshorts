@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Type, Loader2, Video, Sparkles, MoveVertical, Maximize, Zap } from 'lucide-react';
+import { X, Type, Loader2, Video, Sparkles, MoveVertical, Maximize, Zap, ImageIcon } from 'lucide-react';
 import { getApiUrl } from '../config';
 import RemotionPreview from './RemotionPreview';
 
@@ -58,6 +58,16 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
     const [hookEntranceAnimation, setHookEntranceAnimation] = useState('spring');
     const [hookDisplayDuration, setHookDisplayDuration] = useState(5);
 
+    // Image overlay state
+    const [imageEnabled, setImageEnabled] = useState(false);
+    const [imageFile, setImageFile] = useState(null);
+    const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+    const [imagePosition, setImagePosition] = useState('top');
+    const [imageSize, setImageSize] = useState('M');
+    const [imageEntranceAnimation, setImageEntranceAnimation] = useState('spring');
+    const [imageDisplayDuration, setImageDisplayDuration] = useState(5);
+    const [imageOpacity, setImageOpacity] = useState(1.0);
+
     // Initialize hook state when modal opens
     useEffect(() => {
         if (isOpen) {
@@ -115,6 +125,14 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
 
     if (!isOpen) return null;
 
+    // Read image as base64 data URL for backend
+    const readImageAsDataUrl = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+
     // Build subtitle config for Remotion
     const subtitleConfig = subtitleEnabled ? {
         captions,
@@ -138,6 +156,15 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
         size: hookSize,
         entranceAnimation: hookEntranceAnimation,
         displayDurationSec: hookDisplayDuration,
+    } : null;
+
+    const imageOverlayConfig = imageEnabled && imagePreviewUrl ? {
+        imageUrl: imagePreviewUrl,
+        position: imagePosition,
+        size: imageSize,
+        entranceAnimation: imageEntranceAnimation,
+        displayDurationSec: imageDisplayDuration,
+        opacity: imageOpacity,
     } : null;
 
     // Fallback: static CSS preview (same as original)
@@ -192,6 +219,7 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
                             durationInSeconds={durationSec}
                             subtitles={subtitleConfig}
                             hook={hookConfig}
+                            imageOverlay={imageOverlayConfig}
                         />
                     ) : (
                         <>
@@ -495,6 +523,154 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
                             </div>
                         </div>)}
                     </div>
+
+                    {/* --- Image Overlay Section --- */}
+                    <div className="border-t border-white/10 pt-5">
+                        <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                            <ImageIcon size={16} className="text-green-400" /> Image / Logo
+                            <label className="relative inline-flex items-center cursor-pointer ml-auto">
+                                <input type="checkbox" checked={imageEnabled} onChange={(e) => { setImageEnabled(e.target.checked); if (!e.target.checked) setImageFile(null); }} className="sr-only peer" />
+                                <div className="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+                            </label>
+                        </h4>
+                        {imageEnabled && (
+                        <div className="space-y-5">
+                            {/* Image Upload */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 block">Upload Image</label>
+                                {imagePreviewUrl ? (
+                                    <div className="relative mb-3">
+                                        <img src={imagePreviewUrl} alt="Overlay preview" className="w-full max-h-32 object-contain rounded-lg border border-white/10" />
+                                        <button
+                                            onClick={() => { setImageFile(null); setImagePreviewUrl(null); }}
+                                            className="absolute top-1 right-1 w-6 h-6 bg-black/60 rounded-full flex items-center justify-center text-white hover:bg-black/80"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-white/10 rounded-xl cursor-pointer hover:border-green-500/50 transition-colors bg-black/20">
+                                        <ImageIcon size={24} className="text-zinc-500 mb-1" />
+                                        <span className="text-xs text-zinc-500">Click to upload (PNG, JPG)</span>
+                                        <input
+                                            type="file"
+                                            accept="image/png,image/jpeg,image/webp"
+                                            className="hidden"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    setImageFile(file);
+                                                    setImagePreviewUrl(URL.createObjectURL(file));
+                                                }
+                                            }}
+                                        />
+                                    </label>
+                                )}
+                            </div>
+
+                            {/* Image Position */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <MoveVertical size={12} /> Position
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {['top', 'center', 'bottom'].map((pos) => (
+                                        <button
+                                            key={pos}
+                                            onClick={() => setImagePosition(pos)}
+                                            className={`py-2 px-1 rounded-lg text-xs font-bold capitalize transition-all border ${imagePosition === pos
+                                                ? 'bg-white text-black border-white'
+                                                : 'bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {pos}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Image Size */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <Maximize size={12} /> Size
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {['S', 'M', 'L'].map((sz) => (
+                                        <button
+                                            key={sz}
+                                            onClick={() => setImageSize(sz)}
+                                            className={`py-2 px-1 rounded-lg text-xs font-bold transition-all border ${imageSize === sz
+                                                ? 'bg-white text-black border-white'
+                                                : 'bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {sz === 'S' ? 'Small' : sz === 'M' ? 'Medium' : 'Large'}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Image Entrance Animation */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <Zap size={12} /> Entrance
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                        { value: 'spring', label: 'Bounce' },
+                                        { value: 'fade', label: 'Fade' },
+                                        { value: 'slide-up', label: 'Slide Up' },
+                                        { value: 'none', label: 'None' },
+                                    ].map((opt) => (
+                                        <button
+                                            key={opt.value}
+                                            onClick={() => setImageEntranceAnimation(opt.value)}
+                                            className={`py-2 px-1 rounded-lg text-xs font-bold transition-all border ${imageEntranceAnimation === opt.value
+                                                ? 'bg-white text-black border-white'
+                                                : 'bg-white/5 text-zinc-400 border-white/5 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Image Display Duration */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Duration: {imageDisplayDuration}s</label>
+                                <input
+                                    type="range"
+                                    min="2"
+                                    max="15"
+                                    value={imageDisplayDuration}
+                                    onChange={(e) => setImageDisplayDuration(parseInt(e.target.value))}
+                                    className="w-full accent-green-500"
+                                />
+                                <div className="flex justify-between text-[10px] text-zinc-500">
+                                    <span>2s</span>
+                                    <span>15s</span>
+                                </div>
+                            </div>
+
+                            {/* Image Opacity */}
+                            <div>
+                                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Opacity: {Math.round(imageOpacity * 100)}%</label>
+                                <input
+                                    type="range"
+                                    min="10"
+                                    max="100"
+                                    value={Math.round(imageOpacity * 100)}
+                                    onChange={(e) => setImageOpacity(parseInt(e.target.value) / 100)}
+                                    className="w-full accent-green-500"
+                                />
+                                <div className="flex justify-between text-[10px] text-zinc-500">
+                                    <span>10%</span>
+                                    <span>100%</span>
+                                </div>
+                            </div>
+                        </div>)}
+                    </div>
                     </div>
 
                     {/*
@@ -512,11 +688,22 @@ export default function SubtitleModal({ isOpen, onClose, videoUrl, jobId, clipIn
                     */}
 
                     <button
-                        onClick={() => onGenerateBackend({
-                            position, fontSize, fontName, fontColor, highlightColor, borderColor, borderWidth, bgColor, bgOpacity, animation,
-                            ...(subtitleEnabled ? {} : { skip_subtitles: true }),
-                            hook_text: hookEnabled ? (hookText || null) : null, hook_position: hookPosition, hook_size: hookSize, hook_entrance_animation: hookEntranceAnimation, hook_display_duration: hookDisplayDuration,
-                        })}
+                        onClick={async () => {
+                            let imageData = null;
+                            if (imageEnabled && imageFile) {
+                                try {
+                                    imageData = await readImageAsDataUrl(imageFile);
+                                } catch (e) {
+                                    console.warn('Failed to read image:', e);
+                                }
+                            }
+                            onGenerateBackend({
+                                position, fontSize, fontName, fontColor, highlightColor, borderColor, borderWidth, bgColor, bgOpacity, animation,
+                                ...(subtitleEnabled ? {} : { skip_subtitles: true }),
+                                hook_text: hookEnabled ? (hookText || null) : null, hook_position: hookPosition, hook_size: hookSize, hook_entrance_animation: hookEntranceAnimation, hook_display_duration: hookDisplayDuration,
+                                image_overlay_data: imageData, image_position: imagePosition, image_size: imageSize, image_entrance_animation: imageEntranceAnimation, image_display_duration: imageDisplayDuration, image_opacity: imageOpacity,
+                            });
+                        }}
                         disabled={isBackendProcessing}
                         className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 shrink-0"
                     >
