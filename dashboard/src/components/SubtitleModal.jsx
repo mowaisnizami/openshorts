@@ -294,8 +294,9 @@ export default function SubtitleModal({
         {/* Right: Controls */}
         <div className="w-full md:w-80 flex flex-col">
           <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2 shrink-0">
-            <Type className="text-primary" /> Auto Subtitles
-            <label className="relative inline-flex items-center cursor-pointer ml-auto">
+            {/* <Type className="text-primary" />  */}
+            Editor View
+            {/* <label className="relative inline-flex items-center cursor-pointer ml-auto">
               <input
                 type="checkbox"
                 checked={subtitleEnabled}
@@ -303,249 +304,263 @@ export default function SubtitleModal({
                 className="sr-only peer"
               />
               <div className="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-            </label>
+            </label> */}
           </h3>
 
           <div className="space-y-5 flex-1 overflow-y-auto custom-scrollbar pr-1">
-            {subtitleEnabled && (
-              <>
-                <div>
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                    Position: {position} (0 = Bottom, 100 = Top)
-                  </label>
+            <div className="border-t border-white/10 pt-5">
+              <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <Type className="text-primary" /> Auto Subtitles
+                <label className="relative inline-flex items-center cursor-pointer ml-auto">
                   <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={position}
-                    onChange={(e) => setPosition(parseInt(e.target.value))}
-                    className="w-full accent-primary"
+                    type="checkbox"
+                    checked={subtitleEnabled}
+                    onChange={(e) => setSubtitleEnabled(e.target.checked)}
+                    className="sr-only peer"
                   />
-                  <div className="flex justify-between text-[10px] text-zinc-500">
-                    <span>Bottom</span>
-                    <span>Top</span>
-                  </div>
-                </div>
-
-                {/* Animation Style (new) */}
-                <div>
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                    Animation
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {ANIMATION_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setAnimation(opt.value)}
-                        className={`p-2 rounded-lg border text-center text-xs font-medium transition-all ${animation === opt.value ? 'bg-primary/20 border-primary text-white' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10'}`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Editable Transcript (collapsible) */}
-                {useRemotionPreview && (
+                  <div className="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </h4>
+              {subtitleEnabled && (
+                <>
                   <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowTextEditor(!showTextEditor)}
-                      className="w-full flex items-center justify-between text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2"
-                    >
-                      <span>Edit Text ({captions.length} words)</span>
-                      <span
-                        className={`transition-transform ${showTextEditor ? 'rotate-180' : ''}`}
-                      >
-                        ▾
-                      </span>
-                    </button>
-                    {showTextEditor && (
-                      <textarea
-                        value={editableText}
-                        onChange={(e) => handleTextEdit(e.target.value)}
-                        rows={5}
-                        className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-primary/50 resize-none leading-relaxed animate-[fadeIn_0.15s_ease-out]"
-                        placeholder="Edit subtitle text..."
-                      />
-                    )}
-                  </div>
-                )}
-
-                {/* Font Family */}
-                <div>
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                    Font
-                  </label>
-                  <select
-                    value={fontName}
-                    onChange={(e) => setFontName(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-primary/50"
-                  >
-                    {FONT_OPTIONS.map((f) => (
-                      <option
-                        key={f.value}
-                        value={f.value}
-                        style={{ fontFamily: f.value }}
-                      >
-                        {f.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Text Color */}
-                <div>
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                    Text Color
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {COLOR_PRESETS.map((c) => (
-                      <button
-                        key={c.color}
-                        onClick={() => setFontColor(c.color)}
-                        className={`w-7 h-7 rounded-full border-2 transition-all ${fontColor === c.color ? 'border-white scale-110' : 'border-white/20 hover:border-white/50'}`}
-                        style={{ backgroundColor: c.color }}
-                        title={c.label}
-                      />
-                    ))}
-                    <label
-                      className="w-7 h-7 rounded-full border-2 border-dashed border-white/20 cursor-pointer flex items-center justify-center hover:border-white/50 transition-all overflow-hidden relative"
-                      title="Custom color"
-                    >
-                      <span className="text-[10px] text-zinc-400">+</span>
-                      <input
-                        type="color"
-                        value={fontColor}
-                        onChange={(e) => setFontColor(e.target.value)}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Position: {position} (0 = Bottom, 100 = Top)
                     </label>
-                  </div>
-                </div>
-
-                {/* Highlight Color (new) */}
-                <div>
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                    Highlight Color
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { color: '#FFDD00', label: 'Gold' },
-                      { color: '#FF4444', label: 'Red' },
-                      { color: '#00FF88', label: 'Green' },
-                      { color: '#00BBFF', label: 'Blue' },
-                      { color: '#FF69B4', label: 'Pink' }
-                    ].map((c) => (
-                      <button
-                        key={c.color}
-                        onClick={() => setHighlightColor(c.color)}
-                        className={`w-7 h-7 rounded-full border-2 transition-all ${highlightColor === c.color ? 'border-white scale-110' : 'border-white/20 hover:border-white/50'}`}
-                        style={{ backgroundColor: c.color }}
-                        title={c.label}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Border / Outline */}
-                <div>
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                    Border
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <label
-                      className="relative w-8 h-8 rounded-lg border border-white/10 cursor-pointer overflow-hidden shrink-0"
-                      title="Border color"
-                    >
-                      <div
-                        className="w-full h-full"
-                        style={{ backgroundColor: borderColor }}
-                      />
-                      <input
-                        type="color"
-                        value={borderColor}
-                        onChange={(e) => setBorderColor(e.target.value)}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
-                    </label>
-                    <div className="flex-1">
-                      <input
-                        type="range"
-                        min="0"
-                        max="5"
-                        value={borderWidth}
-                        onChange={(e) =>
-                          setBorderWidth(parseInt(e.target.value))
-                        }
-                        className="w-full accent-primary"
-                      />
-                      <div className="flex justify-between text-[10px] text-zinc-500">
-                        <span>None</span>
-                        <span>Thick</span>
-                      </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={position}
+                      onChange={(e) => setPosition(parseInt(e.target.value))}
+                      className="w-full accent-primary"
+                    />
+                    <div className="flex justify-between text-[10px] text-zinc-500">
+                      <span>Bottom</span>
+                      <span>Top</span>
                     </div>
                   </div>
-                </div>
 
-                {/* Background Box */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-                      Background Box
+                  {/* Animation Style (new) */}
+                  <div>
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Animation
                     </label>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={bgOpacity > 0}
-                        onChange={(e) =>
-                          setBgOpacity(e.target.checked ? 0.5 : 0)
-                        }
-                        className="sr-only peer"
-                      />
-                      <div className="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-                    </label>
-                  </div>
-                  {bgOpacity > 0 && (
-                    <div className="space-y-3 animate-[fadeIn_0.2s_ease-out]">
-                      <div className="flex items-center gap-3">
-                        <label
-                          className="relative w-8 h-8 rounded-lg border border-white/10 cursor-pointer overflow-hidden shrink-0"
-                          title="Background color"
+                    <div className="grid grid-cols-2 gap-2">
+                      {ANIMATION_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setAnimation(opt.value)}
+                          className={`p-2 rounded-lg border text-center text-xs font-medium transition-all ${animation === opt.value ? 'bg-primary/20 border-primary text-white' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10'}`}
                         >
-                          <div
-                            className="w-full h-full"
-                            style={{ backgroundColor: bgColor }}
-                          />
-                          <input
-                            type="color"
-                            value={bgColor}
-                            onChange={(e) => setBgColor(e.target.value)}
-                            className="absolute inset-0 opacity-0 cursor-pointer"
-                          />
-                        </label>
-                        <div className="flex-1">
-                          <input
-                            type="range"
-                            min="10"
-                            max="100"
-                            value={Math.round(bgOpacity * 100)}
-                            onChange={(e) =>
-                              setBgOpacity(parseInt(e.target.value) / 100)
-                            }
-                            className="w-full accent-primary"
-                          />
-                          <div className="flex justify-between text-[10px] text-zinc-500">
-                            <span>Transparent</span>
-                            <span>{Math.round(bgOpacity * 100)}%</span>
-                          </div>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Editable Transcript (collapsible) */}
+                  {useRemotionPreview && (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setShowTextEditor(!showTextEditor)}
+                        className="w-full flex items-center justify-between text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2"
+                      >
+                        <span>Edit Text ({captions.length} words)</span>
+                        <span
+                          className={`transition-transform ${showTextEditor ? 'rotate-180' : ''}`}
+                        >
+                          ▾
+                        </span>
+                      </button>
+                      {showTextEditor && (
+                        <textarea
+                          value={editableText}
+                          onChange={(e) => handleTextEdit(e.target.value)}
+                          rows={5}
+                          className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-primary/50 resize-none leading-relaxed animate-[fadeIn_0.15s_ease-out]"
+                          placeholder="Edit subtitle text..."
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Font Family */}
+                  <div>
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Font
+                    </label>
+                    <select
+                      value={fontName}
+                      onChange={(e) => setFontName(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-primary/50"
+                    >
+                      {FONT_OPTIONS.map((f) => (
+                        <option
+                          key={f.value}
+                          value={f.value}
+                          style={{ fontFamily: f.value }}
+                        >
+                          {f.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Text Color */}
+                  <div>
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Text Color
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {COLOR_PRESETS.map((c) => (
+                        <button
+                          key={c.color}
+                          onClick={() => setFontColor(c.color)}
+                          className={`w-7 h-7 rounded-full border-2 transition-all ${fontColor === c.color ? 'border-white scale-110' : 'border-white/20 hover:border-white/50'}`}
+                          style={{ backgroundColor: c.color }}
+                          title={c.label}
+                        />
+                      ))}
+                      <label
+                        className="w-7 h-7 rounded-full border-2 border-dashed border-white/20 cursor-pointer flex items-center justify-center hover:border-white/50 transition-all overflow-hidden relative"
+                        title="Custom color"
+                      >
+                        <span className="text-[10px] text-zinc-400">+</span>
+                        <input
+                          type="color"
+                          value={fontColor}
+                          onChange={(e) => setFontColor(e.target.value)}
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Highlight Color (new) */}
+                  <div>
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Highlight Color
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { color: '#FFDD00', label: 'Gold' },
+                        { color: '#FF4444', label: 'Red' },
+                        { color: '#00FF88', label: 'Green' },
+                        { color: '#00BBFF', label: 'Blue' },
+                        { color: '#FF69B4', label: 'Pink' }
+                      ].map((c) => (
+                        <button
+                          key={c.color}
+                          onClick={() => setHighlightColor(c.color)}
+                          className={`w-7 h-7 rounded-full border-2 transition-all ${highlightColor === c.color ? 'border-white scale-110' : 'border-white/20 hover:border-white/50'}`}
+                          style={{ backgroundColor: c.color }}
+                          title={c.label}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Border / Outline */}
+                  <div>
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                      Border
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <label
+                        className="relative w-8 h-8 rounded-lg border border-white/10 cursor-pointer overflow-hidden shrink-0"
+                        title="Border color"
+                      >
+                        <div
+                          className="w-full h-full"
+                          style={{ backgroundColor: borderColor }}
+                        />
+                        <input
+                          type="color"
+                          value={borderColor}
+                          onChange={(e) => setBorderColor(e.target.value)}
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                        />
+                      </label>
+                      <div className="flex-1">
+                        <input
+                          type="range"
+                          min="0"
+                          max="5"
+                          value={borderWidth}
+                          onChange={(e) =>
+                            setBorderWidth(parseInt(e.target.value))
+                          }
+                          className="w-full accent-primary"
+                        />
+                        <div className="flex justify-between text-[10px] text-zinc-500">
+                          <span>None</span>
+                          <span>Thick</span>
                         </div>
                       </div>
                     </div>
-                  )}
-                </div>
-              </>
-            )}
+                  </div>
+
+                  {/* Background Box */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                        Background Box
+                      </label>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={bgOpacity > 0}
+                          onChange={(e) =>
+                            setBgOpacity(e.target.checked ? 0.5 : 0)
+                          }
+                          className="sr-only peer"
+                        />
+                        <div className="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                      </label>
+                    </div>
+                    {bgOpacity > 0 && (
+                      <div className="space-y-3 animate-[fadeIn_0.2s_ease-out]">
+                        <div className="flex items-center gap-3">
+                          <label
+                            className="relative w-8 h-8 rounded-lg border border-white/10 cursor-pointer overflow-hidden shrink-0"
+                            title="Background color"
+                          >
+                            <div
+                              className="w-full h-full"
+                              style={{ backgroundColor: bgColor }}
+                            />
+                            <input
+                              type="color"
+                              value={bgColor}
+                              onChange={(e) => setBgColor(e.target.value)}
+                              className="absolute inset-0 opacity-0 cursor-pointer"
+                            />
+                          </label>
+                          <div className="flex-1">
+                            <input
+                              type="range"
+                              min="10"
+                              max="100"
+                              value={Math.round(bgOpacity * 100)}
+                              onChange={(e) =>
+                                setBgOpacity(parseInt(e.target.value) / 100)
+                              }
+                              className="w-full accent-primary"
+                            />
+                            <div className="flex justify-between text-[10px] text-zinc-500">
+                              <span>Transparent</span>
+                              <span>{Math.round(bgOpacity * 100)}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* --- Viral Hook Section --- */}
             <div className="border-t border-white/10 pt-5">
@@ -762,7 +777,13 @@ export default function SubtitleModal({
                   {/* Image Horizontal Position */}
                   <div>
                     <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                      Horizontal: {imageHorizontalPosition < 33 ? "Left" : imageHorizontalPosition > 66 ? "Right" : "Center"} ({imageHorizontalPosition})
+                      Horizontal:{' '}
+                      {imageHorizontalPosition < 33
+                        ? 'Left'
+                        : imageHorizontalPosition > 66
+                          ? 'Right'
+                          : 'Center'}{' '}
+                      ({imageHorizontalPosition})
                     </label>
                     <input
                       type="range"
