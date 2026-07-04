@@ -20,10 +20,8 @@ const SIZE_SCALE: Record<string, number> = {
   L: 1.3,
 };
 
-const POSITION_STYLE: Record<string, React.CSSProperties> = {
-  top: { top: "18%", bottom: "auto" },
-  center: { top: "50%", bottom: "auto", transform: "translateY(-50%)" },
-  bottom: { top: "68%", bottom: "auto" },
+const getPositionStyle = (pos: number): React.CSSProperties => {
+  return { top: `${100 - pos}%`, bottom: "auto" };
 };
 
 export const HookOverlay: React.FC<HookOverlayProps> = ({ config }) => {
@@ -97,7 +95,7 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
     });
   }
 
-  const positionStyle = POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
+  const positionStyle = getPositionStyle(config.position);
 
   // Base font size: 5% of 1080 width (matches hooks.py logic)
   const baseFontSize = 1080 * 0.05;

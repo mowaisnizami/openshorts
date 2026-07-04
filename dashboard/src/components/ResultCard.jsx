@@ -265,7 +265,7 @@ export default function ResultCard({
           bg_opacity: options.bgOpacity,
           animation: options.animation,
           hook_text: options.hook_text || null,
-          hook_position: options.hook_position || 'top',
+          hook_position: options.hook_position ?? 0,
           hook_size: options.hook_size || 'M',
           hook_entrance_animation: options.hook_entrance_animation || 'spring',
           hook_display_duration: options.hook_display_duration || 5,

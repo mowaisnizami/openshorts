@@ -752,7 +752,7 @@ class RemotionSubtitleRequest(BaseModel):
     animation: str = "pop"
     input_filename: Optional[str] = None
     hook_text: Optional[str] = None
-    hook_position: str = "top"
+    hook_position: float = 0.0
     hook_size: str = "M"
     hook_entrance_animation: str = "spring"
     hook_display_duration: int = 5

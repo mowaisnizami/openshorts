@@ -41,7 +41,7 @@ const DEFAULT_PROPS: ShortVideoProps = {
   },
   hook: {
     text: "POV: You just discovered OpenShorts",
-    position: "top",
+    position: 0,
     size: "M",
     entranceAnimation: "spring",
     displayDurationSec: 5,

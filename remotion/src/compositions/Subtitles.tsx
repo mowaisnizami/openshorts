@@ -16,7 +16,7 @@ interface SubtitlesProps {
 }
 
 const getPositionStyle = (pos: number): React.CSSProperties => {
-  return { top: 'auto', bottom: `${pos}%` };
+  return { top: `${100 - pos}%`, bottom: "auto" };
 };
 
 export const Subtitles: React.FC<SubtitlesProps> = ({ config }) => {

@@ -30,7 +30,7 @@ export interface SubtitleConfig {
 }
 
 // --- Hook config ---
-export type HookPosition = "top" | "center" | "bottom";
+export type HookPosition = number;
 export type HookSize = "S" | "M" | "L";
 export type HookEntrance = "spring" | "fade" | "slide-up" | "none";
 
@@ -112,7 +112,7 @@ export const subtitleConfigSchema = z.object({
 
 export const hookConfigSchema = z.object({
   text: z.string(),
-  position: z.enum(["top", "center", "bottom"]),
+  position: z.number().min(0).max(100),
   size: z.enum(["S", "M", "L"]),
   entranceAnimation: z.enum(["spring", "fade", "slide-up", "none"]),
   displayDurationSec: z.number().positive(),
