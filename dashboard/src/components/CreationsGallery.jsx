@@ -6,13 +6,28 @@ import {
   History,
   Loader2,
   Play,
-  Trash2
+  RefreshCw,
+  Trash2,
+  Video
 } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { getApiUrl } from '../config';
 import ResultCard from './ResultCard';
 
 const ITEMS_PER_PAGE = 12;
+
+const getYouTubeId = (url) => {
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const match = url.match(regExp);
+  return match && match[2].length === 11 ? match[2] : null;
+};
+
+const STATUS_COLORS = {
+  processing: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
+  queued: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'
+};
 
 function CreationCard({
   creation,
@@ -21,15 +36,20 @@ function CreationCard({
   uploadPostKey,
   uploadUserId,
   onDelete,
-  onNewClip
+  onNewClip,
+  onRetry
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const cardRef = useRef(null);
   const firstClip = creation.clips?.[0];
   const clipCount = creation.clips?.length || 0;
   const date = new Date(creation.created_at).toLocaleDateString();
-  const sourceLabel = creation.source?.startsWith('http')
+  const isYouTube = creation.source?.startsWith('http');
+  const isFailed = creation.status === 'failed';
+  const isProcessing = creation.status === 'processing';
+  const sourceLabel = isYouTube
     ? creation.source.split('?')[0].split('/').slice(0, 3).join('/')
     : creation.source;
 
@@ -49,10 +69,29 @@ function CreationCard({
     };
   }, []);
 
+  const handleRetry = async (e) => {
+    e.stopPropagation();
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      if (onRetry) {
+        await onRetry(creation.job_id);
+      }
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   return (
     <div
       ref={cardRef}
-      className="bg-surface border border-white/5 rounded-xl overflow-hidden hover:border-white/10 transition-all group animate-[fadeIn_0.5s_ease-out]"
+      className={`bg-surface border rounded-xl overflow-hidden transition-all group animate-[fadeIn_0.5s_ease-out] ${
+        isFailed
+          ? 'border-red-500/20 hover:border-red-500/30'
+          : isProcessing
+            ? 'border-amber-500/20 hover:border-amber-500/30'
+            : 'border-white/5 hover:border-white/10'
+      }`}
     >
       {/* Header / Thumbnail */}
       <button
@@ -77,18 +116,38 @@ function CreationCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
             <h3 className="text-sm font-bold text-white truncate">
-              {firstClip?.video_title_for_youtube_short || 'Untitled'}
+              {creation?.original_video_title || 'Untitled'}
             </h3>
             <span className="shrink-0 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">
               {clipCount} clips
             </span>
           </div>
-          <p className="text-[11px] text-zinc-500 truncate">
-            {sourceLabel || 'Unknown source'}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] text-zinc-500 truncate">
+              {sourceLabel || 'Unknown source'}
+            </p>
+            <span
+              className={`shrink-0 text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${
+                STATUS_COLORS[creation.status] || STATUS_COLORS.queued
+              }`}
+            >
+              {creation.status}
+              {isProcessing && creation.step ? `: ${creation.step}` : ''}
+            </span>
+          </div>
           <p className="text-[10px] text-zinc-600">{date}</p>
         </div>
         <div className="shrink-0 text-zinc-500 flex items-center gap-1">
+          {isFailed && (
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              className="p-1.5 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors disabled:opacity-50"
+              title="Retry from Gemini step"
+            >
+              <RefreshCw size={15} className={retrying ? 'animate-spin' : ''} />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -105,20 +164,94 @@ function CreationCard({
         </div>
       </button>
 
-      {/* Expanded clip grid with full ResultCards */}
+      {/* Progress bar for processing creations */}
+      {isProcessing && (
+        <div className="h-1 bg-zinc-800">
+          <div
+            className="h-full bg-amber-500 transition-all duration-1000"
+            style={{ width: `${creation.progress_pct || 0}%` }}
+          />
+        </div>
+      )}
+
+      {/* Expanded section */}
       {expanded && (
         <div className="px-4 pb-4 pt-0 border-t border-white/5 animate-[fadeIn_0.2s_ease-out]">
-          {creation.source?.startsWith('http') && (
+          {/* Original video title */}
+          {creation.original_video_title && (
+            <p className="text-[11px] text-zinc-400 mt-3 mb-1 truncate">
+              Original: {creation.original_video_title}
+            </p>
+          )}
+
+          {/* Original video player */}
+          <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-black mb-3 mt-2">
+            {isYouTube ? (
+              <iframe
+                className="w-full h-full"
+                src={`https://www.youtube.com/embed/${getYouTubeId(creation.source)}?autoplay=0&mute=1&controls=1&loop=1&playlist=${getYouTubeId(creation.source)}&modestbranding=1&showinfo=0&rel=0`}
+                title="Original Video"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              />
+            ) : creation.source ? (
+              <video
+                src={getApiUrl('/uploads/' + creation.source)}
+                className="w-full h-full object-contain"
+                muted
+                loop
+                playsInline
+                controls
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                <Video size={32} className="text-white/20" />
+              </div>
+            )}
+          </div>
+
+          {/* Source link */}
+          {isYouTube && (
             <a
               href={creation.source}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-[11px] text-blue-400 hover:text-blue-300 mb-3 mt-3"
+              className="inline-flex items-center gap-1.5 text-[11px] text-blue-400 hover:text-blue-300 mb-3"
             >
-              <ExternalLink size={12} /> Source
+              <ExternalLink size={12} /> Open original on YouTube
             </a>
           )}
-          <div className="grid grid-cols-3 gap-4">
+          {!isYouTube && creation.source && (
+            <p className="text-[10px] text-zinc-500 mb-3 truncate">
+              File: {creation.source.replace(/^[^_]+_/, '')}
+            </p>
+          )}
+
+          {/* Step history for non-completed creations */}
+          {(isProcessing || isFailed) && creation.steps_history?.length > 0 && (
+            <div className="mb-3">
+              <p className="text-[10px] text-zinc-500 mb-1 font-medium uppercase tracking-wider">
+                Steps
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {creation.steps_history.map((s, i) => (
+                  <span
+                    key={i}
+                    className={`text-[9px] px-1.5 py-0.5 rounded-full border ${
+                      s.step === creation.step && isProcessing
+                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                        : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50'
+                    }`}
+                  >
+                    {s.step}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Clip grid */}
+          <div className="grid grid-cols-2 gap-4">
             {creation.clips.map((clip, i) => (
               <ResultCard
                 key={i}
@@ -191,11 +324,50 @@ export default function CreationsGallery({
       const res = await fetch(getApiUrl(`/api/creations/${jobId}`));
       if (!res.ok) throw new Error('Failed to fetch');
       const updated = await res.json();
-      setCreations((prev) => prev.map((c) => (c.job_id === jobId ? updated : c)));
+      setCreations((prev) =>
+        prev.map((c) => (c.job_id === jobId ? updated : c))
+      );
     } catch (err) {
       console.error('Failed to refresh creation:', err);
     }
   }, []);
+
+  const handleRetry = useCallback(
+    async (jobId) => {
+      try {
+        const res = await fetch(getApiUrl(`/api/process/retry/${jobId}`), {
+          method: 'POST',
+          headers: {
+            'X-Gemini-Key': geminiApiKey,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Failed to retry');
+        }
+        const result = await res.json();
+        // Update the creation entry to show processing status immediately
+        setCreations((prev) =>
+          prev.map((c) =>
+            c.job_id === jobId
+              ? {
+                  ...c,
+                  status: 'processing',
+                  step: 'started',
+                  progress_pct: 0,
+                  clips: [],
+                  steps_history: []
+                }
+              : c
+          )
+        );
+      } catch (err) {
+        alert('Retry failed: ' + err.message);
+      }
+    },
+    [geminiApiKey]
+  );
 
   const handleDelete = useCallback(async (jobId) => {
     try {
@@ -212,6 +384,16 @@ export default function CreationsGallery({
   useEffect(() => {
     fetchCreations(0, false);
   }, [fetchCreations]);
+
+  // Poll for processing creations
+  useEffect(() => {
+    const hasProcessing = creations.some((c) => c.status === 'processing');
+    if (!hasProcessing) return;
+    const interval = setInterval(() => {
+      fetchCreations(0, false);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [creations, fetchCreations]);
 
   useEffect(() => {
     if (!hasMore || loadingMore || loading) return;
@@ -289,6 +471,7 @@ export default function CreationsGallery({
                 uploadUserId={uploadUserId}
                 onDelete={handleDelete}
                 onNewClip={handleNewClip}
+                onRetry={handleRetry}
               />
             ))}
           </div>

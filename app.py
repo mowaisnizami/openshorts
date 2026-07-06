@@ -66,12 +66,18 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
     except ValueError:
         pass
     creations = _load_creations()
+    artifact_urls = {
+        "transcript_file": f"/videos/{job_id}/transcript.json",
+        "prompt_file": f"/videos/{job_id}/prompt_sent.txt",
+        "response_file": f"/videos/{job_id}/gemini_response.json",
+    }
     for existing in creations:
         if existing["job_id"] == job_id:
             existing["clips"] = clips
             existing["status"] = status
             if cost_analysis:
                 existing["cost_analysis"] = cost_analysis
+            existing.update(artifact_urls)
             break
     else:
         creations.insert(0, {
@@ -81,12 +87,39 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
             "clips": clips,
             "cost_analysis": cost_analysis,
             "status": status,
+            "step": "queued",
+            "progress_pct": 0,
+            "steps_history": [],
+            **artifact_urls,
         })
     try:
         with open(CREATIONS_FILE, "w") as f:
             json.dump(creations, f, indent=2)
     except OSError:
         pass
+
+def _set_creation_progress(job_id: str, step: str, progress_pct: int):
+    """Update step/progress for a creation record directly."""
+    creations = _load_creations()
+    for entry in creations:
+        if entry["job_id"] == job_id:
+            entry["step"] = step
+            entry["progress_pct"] = progress_pct
+            if "steps_history" not in entry:
+                entry["steps_history"] = []
+            if not entry["steps_history"] or entry["steps_history"][-1]["step"] != step:
+                entry["steps_history"].append({
+                    "step": step,
+                    "progress": progress_pct,
+                    "timestamp": time.time(),
+                })
+            break
+    try:
+        with open(CREATIONS_FILE, "w") as f:
+            json.dump(creations, f, indent=2)
+    except OSError:
+        pass
+
 
 def _append_clip_to_creation(job_id: str, new_clip: Dict):
     creations = _load_creations()
@@ -241,6 +274,9 @@ app.add_middleware(
 # Mount static files for serving videos
 app.mount("/videos", StaticFiles(directory=OUTPUT_DIR), name="videos")
 
+# Mount static files for serving original uploads
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 # Mount static files for serving thumbnails
 THUMBNAILS_DIR = os.path.join(OUTPUT_DIR, "thumbnails")
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
@@ -332,6 +368,34 @@ async def run_job(job_id, job_data):
                 # Ignore read errors during processing
                 pass
 
+            # Poll progress.json for step tracking
+            try:
+                progress_file = os.path.join(output_dir, "progress.json")
+                if os.path.exists(progress_file):
+                    with open(progress_file, 'r') as f:
+                        pdata = json.load(f)
+                    new_step = pdata.get("step")
+                    new_progress = pdata.get("progress")
+                    if new_step:
+                        creations = _load_creations()
+                        for entry in creations:
+                            if entry["job_id"] == job_id:
+                                entry["step"] = new_step
+                                entry["progress_pct"] = new_progress
+                                if "steps_history" not in entry:
+                                    entry["steps_history"] = []
+                                if not entry["steps_history"] or entry["steps_history"][-1]["step"] != new_step:
+                                    entry["steps_history"].append({
+                                        "step": new_step,
+                                        "progress": new_progress,
+                                        "timestamp": pdata.get("timestamp", time.time()),
+                                    })
+                                break
+                        with open(CREATIONS_FILE, "w") as f:
+                            json.dump(creations, f, indent=2)
+            except Exception:
+                pass
+
         returncode = process.returncode
         
         if returncode == 0:
@@ -364,16 +428,32 @@ async def run_job(job_id, job_data):
                 
                 jobs[job_id]['result'] = {'clips': clips, 'cost_analysis': cost_analysis}
                 _save_creation(job_id, job_data['cmd'], clips, cost_analysis, status="completed")
+                _set_creation_progress(job_id, "completed", 100)
+                # Store original video title from the metadata filename
+                if base_name and base_name != job_id:
+                    creations = _load_creations()
+                    for entry in creations:
+                        if entry["job_id"] == job_id:
+                            entry["original_video_title"] = base_name
+                            break
+                    try:
+                        with open(CREATIONS_FILE, "w") as f:
+                            json.dump(creations, f, indent=2)
+                    except OSError:
+                        pass
             else:
                  jobs[job_id]['status'] = 'failed'
                  jobs[job_id]['logs'].append("No metadata file generated.")
+                 _set_creation_progress(job_id, "failed", 0)
         else:
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['logs'].append(f"Process failed with exit code {returncode}")
+            _set_creation_progress(job_id, "failed", 0)
             
     except Exception as e:
         jobs[job_id]['status'] = 'failed'
         jobs[job_id]['logs'].append(f"Execution error: {str(e)}")
+        _set_creation_progress(job_id, "failed", 0)
 
 @app.get("/api/config")
 async def get_config():
@@ -427,7 +507,8 @@ async def process_endpoint(
     os.makedirs(job_output_dir, exist_ok=True)
 
     # Prepare Command
-    cmd = ["python", "-u", "main.py"] # -u for unbuffered
+    import sys
+    cmd = [sys.executable, "-u", "main.py"] # -u for unbuffered
     env = os.environ.copy()
     env["GEMINI_API_KEY"] = api_key # Override with key from request
 
@@ -469,6 +550,75 @@ async def process_endpoint(
     await job_queue.put(job_id)
 
     return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/api/process/retry/{job_id}")
+async def retry_process_endpoint(job_id: str, request: Request):
+    api_key = request.headers.get("X-Gemini-Key")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+
+    creations = _load_creations()
+    creation = None
+    for entry in creations:
+        if entry["job_id"] == job_id:
+            creation = entry
+            break
+
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
+
+    source = creation.get("source", "")
+    output_dir = os.path.join(OUTPUT_DIR, job_id)
+
+    if not os.path.isdir(output_dir):
+        raise HTTPException(status_code=404, detail="Job output directory not found")
+
+    transcript_file = os.path.join(output_dir, "transcript.json")
+    if not os.path.exists(transcript_file):
+        raise HTTPException(status_code=400, detail="No transcript found for this job. Cannot retry from Gemini step.")
+
+    cmd = [sys.executable, "-u", "main.py"]
+
+    if source.startswith("http"):
+        cmd.extend(["-u", source])
+    else:
+        input_path = os.path.join(UPLOAD_DIR, source)
+        if not os.path.exists(input_path):
+            raise HTTPException(status_code=400, detail=f"Original upload file not found: {input_path}")
+        cmd.extend(["-i", input_path])
+
+    cmd.extend(["-o", output_dir, "--skip-transcribe"])
+
+    env = os.environ.copy()
+    env["GEMINI_API_KEY"] = api_key
+
+    # Reset creation entry
+    creation["clips"] = []
+    creation["status"] = "processing"
+    creation["step"] = "started"
+    creation["progress_pct"] = 0
+    creation["steps_history"] = []
+    try:
+        with open(CREATIONS_FILE, "w") as f:
+            json.dump(creations, f, indent=2)
+    except OSError:
+        pass
+
+    # Enqueue the retry job
+    jobs[job_id] = {
+        'status': 'queued',
+        'logs': [f"Job {job_id} retry queued."],
+        'cmd': cmd,
+        'env': env,
+        'output_dir': output_dir,
+        'attestation': None,
+    }
+
+    await job_queue.put(job_id)
+
+    return {"job_id": job_id, "status": "queued", "retry": True}
+
 
 @app.get("/api/status/{job_id}")
 async def get_status(job_id: str):

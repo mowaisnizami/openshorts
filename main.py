@@ -67,6 +67,17 @@ OUTPUT — RETURN ONLY VALID JSON (no markdown, no comments). Order clips by pre
 }}
 """
 
+def update_progress(output_dir, step, progress, **extra):
+    """Write current progress to a status file so app.py can poll it."""
+    if not output_dir:
+        return
+    data = {"step": step, "progress": progress, "timestamp": time.time(), **extra}
+    os.makedirs(output_dir, exist_ok=True)
+    with open(os.path.join(output_dir, "progress.json"), 'w') as f:
+        json.dump(data, f)
+    print(f"   📊 Progress: {step} ({progress}%)")
+
+
 # Load the YOLO model once (Keep for backup or scene analysis if needed)
 model = YOLO('yolov8n.pt')
 
@@ -798,97 +809,231 @@ def transcribe_video(video_path):
         'language': info.language
     }
 
-def get_viral_clips(transcript_result, video_duration):
-    print("🤖  Analyzing with Gemini...")
-    
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("❌ Error: GEMINI_API_KEY not found in environment variables.")
-        return None
+PROMPT_TEMPLATE_TOKENS = 500
 
 
-    client = genai.Client(api_key=api_key)
-    
-    # We use gemini-2.5-flash as requested.
-    model_name = 'gemini-2.5-flash' 
-    
-    print(f"🤖  Initializing Gemini with model: {model_name}")
+def _estimate_segment_tokens(segments, overhead=PROMPT_TEMPLATE_TOKENS):
+    """Estimate total tokens for a list of segments (text + word timestamps + prompt template overhead)."""
+    total = overhead
+    for seg in segments:
+        total += len(seg.get('text', '')) // 4
+        total += len(seg.get('words', [])) * 10
+    return total
 
-    # Extract words
+
+def _batch_segments(segments, max_tokens=150000):
+    batches = []
+    current_batch = []
+    for seg in segments:
+        current_tokens = _estimate_segment_tokens(current_batch + [seg], overhead=0)
+        if current_tokens > max_tokens and current_batch:
+            batches.append(current_batch)
+            current_batch = [seg]
+        else:
+            current_batch.append(seg)
+    if current_batch:
+        batches.append(current_batch)
+    return batches
+
+
+def _build_words(segments):
     words = []
-    for segment in transcript_result['segments']:
+    for segment in segments:
         for word in segment.get('words', []):
             words.append({
                 'w': word['word'],
                 's': word['start'],
                 'e': word['end']
             })
+    return words
 
-    prompt = GEMINI_PROMPT_TEMPLATE.format(
-        video_duration=video_duration,
-        transcript_text=json.dumps(transcript_result['text']),
-        words_json=json.dumps(words)
-    )
 
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt
-        )
-        
-        # --- Cost Calculation ---
+def _call_gemini(client, model_name, prompt, output_dir, batch_label=""):
+    """Single Gemini API call with retry on 429. Returns parsed result or None."""
+    label = f" {batch_label}" if batch_label else ""
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
         try:
-            usage = response.usage_metadata
-            if usage:
-                # Gemini 2.5 Flash Pricing (Dec 2025)
-                # Input: $0.10 per 1M tokens
-                # Output: $0.40 per 1M tokens
-                
-                input_price_per_million = 0.10
-                output_price_per_million = 0.40
-                
-                prompt_tokens = usage.prompt_token_count
-                output_tokens = usage.candidates_token_count
-                
-                input_cost = (prompt_tokens / 1_000_000) * input_price_per_million
-                output_cost = (output_tokens / 1_000_000) * output_price_per_million
-                total_cost = input_cost + output_cost
-                
-                cost_analysis = {
-                    "input_tokens": prompt_tokens,
-                    "output_tokens": output_tokens,
-                    "input_cost": input_cost,
-                    "output_cost": output_cost,
-                    "total_cost": total_cost,
-                    "model": model_name
-                }
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
 
-                print(f"💰 Token Usage ({model_name}):")
-                print(f"   - Input Tokens: {prompt_tokens} (${input_cost:.6f})")
-                print(f"   - Output Tokens: {output_tokens} (${output_cost:.6f})")
-                print(f"   - Total Estimated Cost: ${total_cost:.6f}")
-                
-        except Exception as e:
-            print(f"⚠️ Could not calculate cost: {e}")
             cost_analysis = None
-        # ------------------------
+            try:
+                usage = response.usage_metadata
+                if usage:
+                    input_price_per_million = 0.10
+                    output_price_per_million = 0.40
+                    prompt_tokens = usage.prompt_token_count
+                    output_tokens = usage.candidates_token_count
+                    input_cost = (prompt_tokens / 1_000_000) * input_price_per_million
+                    output_cost = (output_tokens / 1_000_000) * output_price_per_million
+                    total_cost = input_cost + output_cost
+                    cost_analysis = {
+                        "input_tokens": prompt_tokens,
+                        "output_tokens": output_tokens,
+                        "input_cost": input_cost,
+                        "output_cost": output_cost,
+                        "total_cost": total_cost,
+                        "model": model_name
+                    }
+                    print(f"💰 Token Usage{label} ({model_name}):")
+                    print(f"   - Input Tokens: {prompt_tokens} (${input_cost:.6f})")
+                    print(f"   - Output Tokens: {output_tokens} (${output_cost:.6f})")
+                    print(f"   - Total Estimated Cost: ${total_cost:.6f}")
+            except Exception:
+                cost_analysis = None
 
-        # Clean response if it contains markdown code blocks
-        text = response.text
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        
-        result_json = json.loads(text)
-        if cost_analysis:
-            result_json['cost_analysis'] = cost_analysis
-            
-        return result_json
-    except Exception as e:
-        print(f"❌ Gemini Error: {e}")
+            text = response.text
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+            result_json = json.loads(text)
+            if cost_analysis:
+                result_json['cost_analysis'] = cost_analysis
+
+            suffix = f"_{batch_label}" if batch_label else ""
+            response_file = os.path.join(output_dir, f"gemini_response{suffix}.json")
+            with open(response_file, 'w') as f:
+                json.dump(result_json, f, indent=2)
+            print(f"   Saved Gemini response{label} to {response_file}")
+
+            return result_json
+
+        except Exception as e:
+            error_str = str(e)
+            is_429 = "429" in error_str or "RESOURCE_EXHAUSTED" in error_str
+
+            if is_429 and attempt < max_attempts - 1:
+                import re
+                delay_match = re.search(r'retryDelay["\']?\s*[:=]\s*["\']?(\d+(?:\.\d+)?)', error_str)
+                retry_delay = max(delay_match and float(delay_match.group(1)) + 1 or 60, 60)
+                print(f"⏳ Rate limited (429){label}. Waiting {retry_delay:.0f}s, retry {attempt + 1}/{max_attempts - 1}...")
+                time.sleep(retry_delay)
+                continue
+
+            suffix = f"_{batch_label}" if batch_label else ""
+            error_file = os.path.join(output_dir, f"gemini_response{suffix}.json")
+            with open(error_file, 'w') as f:
+                json.dump({"error": error_str}, f, indent=2)
+            print(f"   Saved Gemini error{label} to {error_file}")
+            return None
+
+    suffix = f"_{batch_label}" if batch_label else ""
+    error_file = os.path.join(output_dir, f"gemini_response{suffix}.json")
+    with open(error_file, 'w') as f:
+        json.dump({"error": "Exhausted retries for 429"}, f, indent=2)
+    print(f"   Exhausted 429 retries{label}")
+    return None
+
+
+def get_viral_clips(transcript_result, video_duration, output_dir=None):
+    print("🤖  Analyzing with Gemini...")
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        print("❌ Error: GEMINI_API_KEY not found in environment variables.")
         return None
+
+    client = genai.Client(api_key=api_key)
+    model_name = 'gemini-2.5-flash'
+    print(f"🤖  Initializing Gemini with model: {model_name}")
+
+    total_tokens = _estimate_segment_tokens(transcript_result['segments'])
+    num_batches = max(1, (total_tokens + 149999) // 150000)
+
+    if num_batches == 1:
+        # Single batch — original flow
+        words = _build_words(transcript_result['segments'])
+        prompt = GEMINI_PROMPT_TEMPLATE.format(
+            video_duration=video_duration,
+            transcript_text=json.dumps(transcript_result['text']),
+            words_json=json.dumps(words)
+        )
+
+        if output_dir:
+            prompt_for_save = GEMINI_PROMPT_TEMPLATE.format(
+                video_duration=video_duration,
+                transcript_text="[See transcript.json for full transcript]",
+                words_json="[See transcript.json for word-level timestamps]"
+            )
+            prompt_file = os.path.join(output_dir, "prompt_sent.txt")
+            with open(prompt_file, 'w') as f:
+                f.write(prompt_for_save)
+            print(f"   Saved prompt to {prompt_file}")
+
+        update_progress(output_dir, "calling_gemini", 50)
+        result = _call_gemini(client, model_name, prompt, output_dir)
+        if result:
+            update_progress(output_dir, "gemini_done", 65)
+        return result
+
+    # Multi-batch flow
+    print(f"📦 Transcript ~{total_tokens:,} tokens exceeds 150K. Splitting into {num_batches} batches.")
+    segment_batches = _batch_segments(transcript_result['segments'])
+
+    if output_dir:
+        prompt_for_save = GEMINI_PROMPT_TEMPLATE.format(
+            video_duration=video_duration,
+            transcript_text=f"[Batched into {num_batches} batches — See transcript.json for full transcript]",
+            words_json=f"[Batched into {num_batches} batches — See transcript.json for word-level timestamps]"
+        )
+        prompt_file = os.path.join(output_dir, "prompt_sent.txt")
+        with open(prompt_file, 'w') as f:
+            f.write(prompt_for_save)
+        print(f"   Saved prompt to {prompt_file}")
+
+    all_shorts = []
+    merged_cost = None
+
+    for i, batch_segs in enumerate(segment_batches):
+        batch_label = f"batch_{i+1}"
+        batch_text = " ".join(s.get('text', '') for s in batch_segs)
+        batch_words = _build_words(batch_segs)
+
+        batch_prompt = GEMINI_PROMPT_TEMPLATE.format(
+            video_duration=video_duration,
+            transcript_text=json.dumps(batch_text),
+            words_json=json.dumps(batch_words)
+        )
+
+        if i > 0:
+            print(f"⏳ Waiting 2 minutes before batch {i+1} (rate limit)...")
+            time.sleep(120)
+
+        update_progress(output_dir, "calling_gemini", 50 + i * 5)
+        result = _call_gemini(client, model_name, batch_prompt, output_dir, batch_label=batch_label)
+
+        if result and 'shorts' in result:
+            all_shorts.extend(result['shorts'])
+            if not merged_cost and result.get('cost_analysis'):
+                merged_cost = result['cost_analysis']
+
+    if not all_shorts:
+        print("❌ Gemini returned no valid clips across all batches.")
+        return None
+
+    merged_result = {
+        "shorts": all_shorts,
+        "transcript": transcript_result,
+    }
+    if merged_cost:
+        merged_result["cost_analysis"] = merged_cost
+
+    # Save merged response
+    response_file = os.path.join(output_dir, "gemini_response.json")
+    with open(response_file, 'w') as f:
+        json.dump(merged_result, f, indent=2)
+    print(f"   Saved merged Gemini response to {response_file}")
+
+    print(f"🔥 Found {len(all_shorts)} viral clips across {num_batches} batches!")
+    update_progress(output_dir, "gemini_done", 65)
+    return merged_result
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="AutoCrop-Vertical with Viral Clip Detection.")
@@ -900,6 +1045,7 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--output', type=str, help="Output directory or file (if processing whole video).")
     parser.add_argument('--keep-original', action='store_true', help="Keep the downloaded YouTube video.")
     parser.add_argument('--skip-analysis', action='store_true', help="Skip AI analysis and convert the whole video.")
+    parser.add_argument('--skip-transcribe', action='store_true', help="Skip download & transcription; load transcript from output dir.")
     
     args = parser.parse_args()
 
@@ -953,9 +1099,28 @@ if __name__ == '__main__':
         output_file = args.output if args.output else os.path.join(output_dir, f"{video_title}_vertical.mp4")
         process_video_to_vertical(input_video, output_file)
     else:
-        # 3. Transcribe
-        transcript = transcribe_video(input_video)
-        
+        update_progress(output_dir, "started", 5)
+
+        # 3. Transcribe (or load from cache on retry)
+        if args.skip_transcribe:
+            transcript_file = os.path.join(output_dir, "transcript.json")
+            if not os.path.exists(transcript_file):
+                print(f"❌ --skip-transcribe set but no transcript.json found at {transcript_file}")
+                exit(1)
+            with open(transcript_file, 'r') as f:
+                transcript = json.load(f)
+            print(f"   Loaded transcript from {transcript_file}")
+            update_progress(output_dir, "subtitled", 40)
+        else:
+            update_progress(output_dir, "subtitling", 25)
+            transcript = transcribe_video(input_video)
+
+            transcript_file = os.path.join(output_dir, "transcript.json")
+            with open(transcript_file, 'w') as f:
+                json.dump(transcript, f, indent=2)
+            print(f"   Saved transcript to {transcript_file}")
+            update_progress(output_dir, "subtitled", 40)
+
         # Get duration
         cap = cv2.VideoCapture(input_video)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -964,7 +1129,7 @@ if __name__ == '__main__':
         cap.release()
 
         # 4. Gemini Analysis
-        clips_data = get_viral_clips(transcript, duration)
+        clips_data = get_viral_clips(transcript, duration, output_dir)
         
         if not clips_data or 'shorts' not in clips_data:
             print("❌ Failed to identify clips. Converting whole video as fallback.")
@@ -995,6 +1160,7 @@ if __name__ == '__main__':
             with open(metadata_file, 'w') as f:
                 json.dump(clips_data, f, indent=2)
             print(f"   Saved metadata to {metadata_file}")
+            update_progress(output_dir, "clipping", 70, total_clips=len(clips_data['shorts']))
 
             # 5. Process each clip
             for i, clip in enumerate(clips_data['shorts']):
@@ -1031,6 +1197,8 @@ if __name__ == '__main__':
                 # Clean up temp cut
                 if os.path.exists(clip_temp_path):
                     os.remove(clip_temp_path)
+
+        update_progress(output_dir, "completed", 100)
 
     # Clean up original if requested
     if args.url and not args.keep_original and os.path.exists(input_video):
