@@ -1162,6 +1162,10 @@ if __name__ == '__main__':
             print(f"   Saved metadata to {metadata_file}")
             update_progress(output_dir, "clipping", 70, total_clips=len(clips_data['shorts']))
 
+            # Assign clip IDs
+            for i, clip in enumerate(clips_data['shorts']):
+                clip['clip_id'] = i + 1
+
             # 5. Process each clip
             for i, clip in enumerate(clips_data['shorts']):
                 start = clip['start']

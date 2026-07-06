@@ -5,17 +5,20 @@ import {
   Clock,
   Copy,
   Download,
+  Grid3x3,
   Instagram,
   Languages,
   Loader2,
+  MoreVertical,
   Share2,
+  Trash2,
   Type,
   Video,
   Wand2,
   X,
   Youtube
 } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { getApiUrl } from '../config';
 import { renderInBrowser, supportsWebCodecsH264 } from '../lib/renderInBrowser';
 // import HookModal from './HookModal';
@@ -33,12 +36,17 @@ export default function ResultCard({
   onPlay,
   onPause,
   showActions = true,
-  onNewClip
+  onNewClip,
+  onClipDeleted
 }) {
   const [showModal, setShowModal] = useState(false);
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef(null);
   const videoRef = React.useRef(null);
-  const originalVideoUrl = getApiUrl(clip.video_url); // Never changes — used for Remotion previews
+  const originalVideoUrl = clip.video_url ? getApiUrl(clip.video_url) : null; // Never changes — used for Remotion previews
   const [currentVideoUrl, setCurrentVideoUrl] = useState(originalVideoUrl);
 
   const [platforms, setPlatforms] = useState({
@@ -83,6 +91,61 @@ export default function ResultCard({
       })
       .catch(() => {});
   }, [jobId, index]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    if (!showMenu) return;
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showMenu]);
+
+  const handleCopy = useCallback(async () => {
+    const title = clip.video_title_for_youtube_short || '';
+    const caption = clip.video_description_for_tiktok ||
+      clip.video_description_for_instagram || '';
+    const text = title + (caption ? `\n\n${caption}` : '');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
+    setShowMenu(false);
+  }, [clip]);
+
+  const handleDeleteVideoOnly = useCallback(async () => {
+    setShowMenu(false);
+    if (!confirm('Delete video file only? The clip metadata (title, captions) will be preserved.')) return;
+    try {
+      const res = await fetch(getApiUrl(`/api/creations/${jobId}/clips/${index}/video`), {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Failed to delete video');
+      onClipDeleted?.(jobId, index, 'video');
+    } catch (err) {
+      alert('Failed to delete video: ' + err.message);
+    }
+  }, [jobId, index, onClipDeleted]);
+
+  const handleDeleteClip = useCallback(async () => {
+    setShowMenu(false);
+    if (!confirm('Delete this clip entirely? The video file and all metadata will be removed.')) return;
+    try {
+      const res = await fetch(getApiUrl(`/api/creations/${jobId}/clips/${index}`), {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Failed to delete clip');
+      onClipDeleted?.(jobId, index, 'clip');
+    } catch (err) {
+      alert('Failed to delete clip: ' + err.message);
+    }
+  }, [jobId, index, onClipDeleted]);
 
   // Initialize/Reset form when modal opens
   useEffect(() => {
@@ -511,29 +574,36 @@ export default function ResultCard({
     >
       {/* Left: Video Preview (Responsive Width) */}
       <div className="w-full md:w-[180px] lg:w-[200px] bg-black relative shrink-0 aspect-[9/16] md:aspect-auto group/video">
-        <video
-          ref={videoRef}
-          src={currentVideoUrl}
-          controls
-          className="w-full h-full object-cover"
-          playsInline
-          onPlay={() => {
-            const currentTime = videoRef.current
-              ? videoRef.current.currentTime
-              : 0;
-            onPlay && onPlay(clip.start + currentTime);
-          }}
-          onPause={() => onPause && onPause()}
-          onEnded={() => {
-            if (videoRef.current) {
-              videoRef.current.currentTime = 0;
-              videoRef.current.play();
-            }
-          }}
-        />
+        {clip.video_deleted ? (
+          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-600 p-4">
+            <Trash2 size={24} className="mb-2 opacity-50" />
+            <p className="text-[11px] text-zinc-500 text-center">Video file deleted</p>
+          </div>
+        ) : (
+          <video
+            ref={videoRef}
+            src={currentVideoUrl}
+            controls
+            className="w-full h-full object-cover"
+            playsInline
+            onPlay={() => {
+              const currentTime = videoRef.current
+                ? videoRef.current.currentTime
+                : 0;
+              onPlay && onPlay(clip.start + currentTime);
+            }}
+            onPause={() => onPause && onPause()}
+            onEnded={() => {
+              if (videoRef.current) {
+                videoRef.current.currentTime = 0;
+                videoRef.current.play();
+              }
+            }}
+          />
+        )}
         <div className="absolute top-3 left-3 flex gap-2">
           <span className="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-white/10 uppercase tracking-wide">
-            Clip {index + 1}
+            Clip {clip.clip_id || index + 1}
           </span>
           {clip.derived && (
             <span className="bg-purple-600/80 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-md border border-purple-400/30 uppercase tracking-wide">
@@ -541,6 +611,25 @@ export default function ResultCard({
             </span>
           )}
         </div>
+
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowGrid(!showGrid); }}
+          className={`absolute top-3 right-3 p-1 rounded transition-colors z-[5] ${
+            showGrid ? 'bg-primary/40 text-white' : 'bg-black/40 text-white/60 hover:text-white'
+          }`}
+          title="Toggle alignment grid"
+        >
+          <Grid3x3 size={14} />
+        </button>
+
+        {showGrid && (
+          <div className="absolute inset-0 pointer-events-none z-[4]">
+            <div className="absolute left-[33.33%] top-0 w-[1px] h-full bg-white/30" />
+            <div className="absolute left-[66.67%] top-0 w-[1px] h-full bg-white/30" />
+            <div className="absolute top-[33.33%] left-0 h-[1px] w-full bg-white/30" />
+            <div className="absolute top-[66.67%] left-0 h-[1px] w-full bg-white/30" />
+          </div>
+        )}
 
         {/* Auto Edit Overlay if Processing */}
         {isEditing && (
@@ -558,23 +647,56 @@ export default function ResultCard({
 
       {/* Right: Content & Details */}
       <div className="flex-1 p-4 md:p-5 flex flex-col bg-[#121214] overflow-hidden min-w-0">
-        <div className="mb-4">
-          <h3
-            className="text-base font-bold text-white leading-tight line-clamp-2 mb-2 break-words"
-            title={clip.video_title_for_youtube_short}
-          >
-            {clip.video_title_for_youtube_short || 'Viral Clip Generated'}
-          </h3>
-          <div className="flex flex-wrap gap-2 text-[10px] text-zinc-500 font-mono">
-            <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">
-              {Math.floor(clip.end - clip.start)}s
-            </span>
-            <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">
-              #shorts
-            </span>
-            <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">
-              #viral
-            </span>
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex-1 min-w-0">
+            <h3
+              className="text-base font-bold text-white leading-tight line-clamp-2 mb-2 break-words"
+              title={clip.video_title_for_youtube_short}
+            >
+              {clip.video_title_for_youtube_short || 'Viral Clip Generated'}
+            </h3>
+            <div className="flex flex-wrap gap-2 text-[10px] text-zinc-500 font-mono">
+              <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">
+                {Math.floor(clip.end - clip.start)}s
+              </span>
+              <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">
+                #shorts
+              </span>
+              <span className="bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">
+                #viral
+              </span>
+            </div>
+          </div>
+          <div className="relative shrink-0 ml-2" ref={menuRef}>
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+            >
+              <MoreVertical size={14} className="text-zinc-500" />
+            </button>
+            {showMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-zinc-800 border border-white/10 rounded-lg shadow-xl z-50 min-w-[170px] py-1">
+                <button
+                  onClick={handleCopy}
+                  className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 hover:text-white flex items-center gap-2"
+                >
+                  <Copy size={12} /> Copy Title + Caption
+                </button>
+                <button
+                  onClick={handleDeleteVideoOnly}
+                  className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 hover:text-white flex items-center gap-2"
+                >
+                  <Trash2 size={12} /> Delete Video Only
+                </button>
+                <div className="border-t border-white/5 my-1" />
+                <button
+                  onClick={handleDeleteClip}
+                  className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 flex items-center gap-2"
+                >
+                  <Trash2 size={12} /> Delete Clip
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -677,30 +799,38 @@ export default function ResultCard({
             >
               <Share2 size={14} className="shrink-0" /> Post
             </button>
+            {!clip.video_deleted && (
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const response = await fetch(currentVideoUrl);
+                    if (!response.ok) throw new Error('Download failed');
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = `clip-${index + 1}.mp4`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                  } catch (err) {
+                    console.error('Download error:', err);
+                    if (currentVideoUrl) window.open(currentVideoUrl, '_blank');
+                  }
+                }}
+                className="col-span-1 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 border border-white/5 truncate px-2"
+              >
+                <Download size={14} className="shrink-0" /> Download
+              </button>
+            )}
             <button
-              onClick={async (e) => {
-                e.preventDefault();
-                try {
-                  const response = await fetch(currentVideoUrl);
-                  if (!response.ok) throw new Error('Download failed');
-                  const blob = await response.blob();
-                  const url = window.URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.style.display = 'none';
-                  a.href = url;
-                  a.download = `clip-${index + 1}.mp4`;
-                  document.body.appendChild(a);
-                  a.click();
-                  window.URL.revokeObjectURL(url);
-                  document.body.removeChild(a);
-                } catch (err) {
-                  console.error('Download error:', err);
-                  window.open(currentVideoUrl, '_blank');
-                }
-              }}
+              onClick={handleCopy}
               className="col-span-1 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-2 border border-white/5 truncate px-2"
             >
-              <Download size={14} className="shrink-0" /> Download
+              <Copy size={14} className="shrink-0" /> {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
         )}

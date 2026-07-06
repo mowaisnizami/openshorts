@@ -5,6 +5,7 @@ import {
   ExternalLink,
   History,
   Loader2,
+  MoreVertical,
   Play,
   RefreshCw,
   Trash2,
@@ -37,12 +38,16 @@ function CreationCard({
   uploadUserId,
   onDelete,
   onNewClip,
-  onRetry
+  onRetry,
+  onClipDeleted,
+  onDeleteAllVideos
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [showVideoMenu, setShowVideoMenu] = useState(false);
   const cardRef = useRef(null);
+  const videoMenuRef = useRef(null);
   const firstClip = creation.clips?.[0];
   const clipCount = creation.clips?.length || 0;
   const date = new Date(creation.created_at).toLocaleDateString();
@@ -81,6 +86,17 @@ function CreationCard({
       setRetrying(false);
     }
   };
+
+  useEffect(() => {
+    if (!showVideoMenu) return;
+    const handler = (e) => {
+      if (videoMenuRef.current && !videoMenuRef.current.contains(e.target)) {
+        setShowVideoMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showVideoMenu]);
 
   return (
     <div
@@ -160,6 +176,34 @@ function CreationCard({
           >
             <Trash2 size={15} />
           </button>
+          <div className="relative" ref={videoMenuRef}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowVideoMenu(!showVideoMenu);
+              }}
+              className="p-1.5 hover:text-zinc-300 hover:bg-white/5 rounded-lg transition-colors"
+              title="More options"
+            >
+              <MoreVertical size={15} />
+            </button>
+            {showVideoMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-zinc-800 border border-white/10 rounded-lg shadow-xl z-50 min-w-[160px] py-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowVideoMenu(false);
+                    if (confirm('Delete all video files for this creation? Metadata will be preserved.')) {
+                      onDeleteAllVideos?.(creation.job_id);
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 flex items-center gap-2"
+                >
+                  <Trash2 size={12} /> Delete All Videos
+                </button>
+              </div>
+            )}
+          </div>
           {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
         </div>
       </button>
@@ -265,6 +309,7 @@ function CreationCard({
                 onPlay={() => {}}
                 onPause={() => {}}
                 onNewClip={onNewClip}
+                onClipDeleted={onClipDeleted}
               />
             ))}
           </div>
@@ -381,6 +426,48 @@ export default function CreationsGallery({
     }
   }, []);
 
+  const handleClipDeleted = useCallback((jobId, clipIndex, type) => {
+    setCreations((prev) =>
+      prev.map((c) => {
+        if (c.job_id !== jobId) return c;
+        if (type === 'clip') {
+          const newClips = [...c.clips];
+          newClips.splice(clipIndex, 1);
+          return { ...c, clips: newClips };
+        }
+        const newClips = c.clips.map((clip, i) =>
+          i === clipIndex ? { ...clip, video_url: null, video_deleted: true } : clip
+        );
+        return { ...c, clips: newClips };
+      })
+    );
+  }, []);
+
+  const handleDeleteAllVideos = useCallback(async (jobId) => {
+    try {
+      const res = await fetch(getApiUrl(`/api/creations/${jobId}/videos`), {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Failed to delete videos');
+      setCreations((prev) =>
+        prev.map((c) =>
+          c.job_id === jobId
+            ? {
+                ...c,
+                clips: c.clips.map((clip) => ({
+                  ...clip,
+                  video_url: null,
+                  video_deleted: true
+                }))
+              }
+            : c
+        )
+      );
+    } catch (err) {
+      alert('Failed to delete videos: ' + err.message);
+    }
+  }, []);
+
   useEffect(() => {
     fetchCreations(0, false);
   }, [fetchCreations]);
@@ -472,6 +559,8 @@ export default function CreationsGallery({
                 onDelete={handleDelete}
                 onNewClip={handleNewClip}
                 onRetry={handleRetry}
+                onClipDeleted={handleClipDeleted}
+                onDeleteAllVideos={handleDeleteAllVideos}
               />
             ))}
           </div>

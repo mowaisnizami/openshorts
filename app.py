@@ -52,6 +52,29 @@ def _load_creations() -> List[Dict]:
     except (json.JSONDecodeError, OSError):
         return []
 
+def _write_creations(creations: List[Dict]):
+    try:
+        with open(CREATIONS_FILE, "w") as f:
+            json.dump(creations, f, indent=2)
+    except OSError:
+        pass
+
+def _get_next_clip_version(creations: List[Dict], job_id: str, base_id: int) -> str:
+    for entry in creations:
+        if entry["job_id"] == job_id:
+            max_version = 0
+            for clip in entry.get("clips", []):
+                cid = str(clip.get("clip_id", ""))
+                if cid == str(base_id) or cid.startswith(f"{base_id}-"):
+                    parts = cid.split("-")
+                    if len(parts) >= 2:
+                        try:
+                            max_version = max(max_version, int(parts[-1]))
+                        except ValueError:
+                            pass
+            return f"{base_id}-{max_version + 1}"
+    return f"{base_id}-1"
+
 def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None, status: str = "completed"):
     source = ""
     try:
@@ -92,11 +115,8 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
             "steps_history": [],
             **artifact_urls,
         })
-    try:
-        with open(CREATIONS_FILE, "w") as f:
-            json.dump(creations, f, indent=2)
-    except OSError:
-        pass
+    _write_creations(creations)
+
 
 def _set_creation_progress(job_id: str, step: str, progress_pct: int):
     """Update step/progress for a creation record directly."""
@@ -114,11 +134,7 @@ def _set_creation_progress(job_id: str, step: str, progress_pct: int):
                     "timestamp": time.time(),
                 })
             break
-    try:
-        with open(CREATIONS_FILE, "w") as f:
-            json.dump(creations, f, indent=2)
-    except OSError:
-        pass
+    _write_creations(creations)
 
 
 def _append_clip_to_creation(job_id: str, new_clip: Dict):
@@ -127,11 +143,7 @@ def _append_clip_to_creation(job_id: str, new_clip: Dict):
         if existing["job_id"] == job_id:
             existing.setdefault("clips", []).append(new_clip)
             break
-    try:
-        with open(CREATIONS_FILE, "w") as f:
-            json.dump(creations, f, indent=2)
-    except OSError:
-        pass
+    _write_creations(creations)
 
 def _relocate_root_job_artifacts(job_id: str, job_output_dir: str) -> bool:
     """
@@ -654,15 +666,67 @@ async def delete_creation(job_id: str):
     filtered = [e for e in creations if e["job_id"] != job_id]
     if len(filtered) == len(creations):
         raise HTTPException(status_code=404, detail="Creation not found")
-    try:
-        with open(CREATIONS_FILE, "w") as f:
-            json.dump(filtered, f, indent=2)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save: {e}")
+    _write_creations(filtered)
     job_path = os.path.join(OUTPUT_DIR, job_id)
     if os.path.isdir(job_path):
         shutil.rmtree(job_path, ignore_errors=True)
     return {"status": "deleted"}
+
+
+@app.delete("/api/creations/{job_id}/clips/{clip_index}")
+async def delete_clip(job_id: str, clip_index: int):
+    creations = _load_creations()
+    for entry in creations:
+        if entry["job_id"] == job_id:
+            clips = entry.get("clips", [])
+            if clip_index < 0 or clip_index >= len(clips):
+                raise HTTPException(status_code=404, detail="Clip not found")
+            clip = entry["clips"].pop(clip_index)
+            if clip.get("video_url"):
+                video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+            _write_creations(creations)
+            return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail="Creation not found")
+
+
+@app.delete("/api/creations/{job_id}/clips/{clip_index}/video")
+async def delete_clip_video(job_id: str, clip_index: int):
+    creations = _load_creations()
+    for entry in creations:
+        if entry["job_id"] == job_id:
+            clips = entry.get("clips", [])
+            if clip_index < 0 or clip_index >= len(clips):
+                raise HTTPException(status_code=404, detail="Clip not found")
+            clip = entry["clips"][clip_index]
+            if clip.get("video_url"):
+                video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+                clip["video_url"] = None
+                clip["video_deleted"] = True
+            _write_creations(creations)
+            return {"status": "video_deleted"}
+    raise HTTPException(status_code=404, detail="Creation not found")
+
+
+@app.delete("/api/creations/{job_id}/videos")
+async def delete_creation_videos(job_id: str):
+    creations = _load_creations()
+    for entry in creations:
+        if entry["job_id"] == job_id:
+            for clip in entry.get("clips", []):
+                if clip.get("video_url"):
+                    video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
+                    if os.path.exists(video_path):
+                        os.remove(video_path)
+                    clip["video_url"] = None
+                    clip["video_deleted"] = True
+            _write_creations(creations)
+            return {"status": "videos_deleted"}
+    raise HTTPException(status_code=404, detail="Creation not found")
+
 
 from editor import VideoEditor
 from subtitles import generate_srt, burn_subtitles, generate_srt_from_video
@@ -1069,6 +1133,10 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
 
     # Build new clip entry with distinguishing metadata
     new_clip = dict(clip_data)
+    parent_clip_id = clip_data.get("clip_id", req.clip_index + 1)
+    base_id = str(parent_clip_id).split("-")[0]
+    creations = _load_creations()
+    new_clip["clip_id"] = _get_next_clip_version(creations, req.job_id, int(base_id))
     new_clip["video_url"] = f"/videos/{req.job_id}/{output_filename}"
     new_clip["derived"] = True
     new_clip["derived_from_clip_index"] = req.clip_index

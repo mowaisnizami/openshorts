@@ -1,4 +1,5 @@
 import {
+  Grid3x3,
   ImageIcon,
   Loader2,
   Maximize,
@@ -70,6 +71,7 @@ export default function SubtitleModal({
   const [durationSec, setDurationSec] = useState(30);
   const [captionsLoading, setCaptionsLoading] = useState(false);
   const [useRemotionPreview, setUseRemotionPreview] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
 
   // Hook state
   const [hookText, setHookText] = useState('');
@@ -256,6 +258,23 @@ export default function SubtitleModal({
 
         {/* Left: Preview */}
         <div className="flex-1 flex flex-col items-center justify-center bg-black rounded-lg border border-white/5 overflow-hidden relative aspect-[9/16] max-h-[600px]">
+          <button
+            onClick={() => setShowGrid(!showGrid)}
+            className={`absolute top-3 right-3 p-1 rounded transition-colors z-10 ${
+              showGrid ? 'bg-primary/40 text-white' : 'bg-black/40 text-white/60 hover:text-white'
+            }`}
+            title="Toggle alignment grid"
+          >
+            <Grid3x3 size={14} />
+          </button>
+          {showGrid && (
+            <div className="absolute inset-0 pointer-events-none z-[5]">
+              <div className="absolute left-[33.33%] top-0 w-px h-full bg-white/30" />
+              <div className="absolute left-[66.67%] top-0 w-px h-full bg-white/30" />
+              <div className="absolute top-[33.33%] left-0 h-px w-full bg-white/30" />
+              <div className="absolute top-[66.67%] left-0 h-px w-full bg-white/30" />
+            </div>
+          )}
           {captionsLoading ? (
             <div className="flex items-center gap-2 text-zinc-400">
               <Loader2 size={16} className="animate-spin" />
