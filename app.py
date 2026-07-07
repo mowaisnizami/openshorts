@@ -40,6 +40,7 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 # Application State
 job_queue = asyncio.Queue()
 jobs: Dict[str, Dict] = {}
+remotion_jobs: Dict[str, Dict] = {}
 thumbnail_sessions: Dict[str, Dict] = {}
 publish_jobs: Dict[str, Dict] = {}  # {publish_id: {status, result, error}}
 # Semester to limit concurrency to MAX_CONCURRENT_JOBS
@@ -1043,9 +1044,9 @@ class RemotionSubtitleRequest(BaseModel):
     image_opacity: float = 1.0
 
 
-@app.post("/api/remotion/subtitle")
-async def remotion_subtitle(req: RemotionSubtitleRequest):
-    """Render subtitles using the Remotion render service (Puppeteer + @remotion/renderer)."""
+@app.post("/api/remotion/submit")
+async def remotion_submit(req: RemotionSubtitleRequest):
+    """Submit a Remotion render job and return immediately. Frontend polls /api/remotion/status/{render_id}."""
     output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1150,76 +1151,110 @@ async def remotion_subtitle(req: RemotionSubtitleRequest):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid image data: {str(e)}")
 
-    # Submit to render service and poll for completion
-    import httpx
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.post(
-                f"{RENDER_SERVICE_URL}/render",
-                json={"jobId": req.job_id, "clipIndex": req.clip_index, "props": remotion_props},
-            )
-            if resp.status_code != 202:
-                raise HTTPException(status_code=502, detail=f"Render service error: {resp.text}")
-            render_id = resp.json().get("renderId")
-        except httpx.ConnectError:
-            raise HTTPException(status_code=502, detail="Render service not running. Start it with: cd render-service && npm run dev")
-
-        # Poll for completion (with timeout)
-        max_wait = 180  # 3 minutes max
-        poll_interval = 2
-        waited = 0
-        output_path = None
-        while waited < max_wait:
-            await asyncio.sleep(poll_interval)
-            waited += poll_interval
-            try:
-                status_resp = await client.get(f"{RENDER_SERVICE_URL}/render/{render_id}")
-                if status_resp.status_code != 200:
-                    continue
-                status_data = status_resp.json()
-                if status_data.get("status") == "done":
-                    output_path = status_data.get("outputUrl")
-                    break
-                elif status_data.get("status") == "error":
-                    raise HTTPException(status_code=500, detail=f"Render failed: {status_data.get('error', 'Unknown error')}")
-            except httpx.ConnectError:
-                raise HTTPException(status_code=502, detail="Render service disconnected during render")
-
-    if not output_path:
-        raise HTTPException(status_code=504, detail="Render timed out")
-
-    # Copy output to expected location
     has_hook = bool(req.hook_text)
     has_image = bool(req.image_overlay_data)
     output_filename = f"remotion_enhanced_{filename}" if (has_hook or has_image) else f"remotion_subtitled_{filename}"
-    final_path = os.path.join(output_dir, output_filename)
-    shutil.copy2(output_path, final_path)
 
-    # Build new clip entry with distinguishing metadata
-    new_clip = dict(clip_data)
-    parent_clip_id = clip_data.get("clip_id", req.clip_index + 1)
-    base_id = str(parent_clip_id).split("-")[0]
-    creations = _load_creations()
-    new_clip["clip_id"] = _get_next_clip_version(creations, req.job_id, int(base_id))
-    new_clip["video_url"] = f"/videos/{req.job_id}/{output_filename}"
-    new_clip["derived"] = True
-    new_clip["derived_from_clip_index"] = req.clip_index
-    derived_types = []
-    if has_hook:
-        derived_types.append("hook")
-    if has_image:
-        derived_types.append("overlay")
-    if not derived_types:
-        derived_types.append("subtitle")
-    new_clip["derived_type"] = "remotion_" + "_".join(derived_types)
+    render_id = str(uuid.uuid4())
+    remotion_jobs[render_id] = {
+        "status": "queued",
+        "job_id": req.job_id,
+        "clip_index": req.clip_index,
+        "output_dir": output_dir,
+        "output_filename": output_filename,
+        "clip_data": clip_data,
+        "remotion_props": remotion_props,
+        "result": None,
+        "error": None,
+    }
 
-    # Append to creations.json
-    _append_clip_to_creation(req.job_id, new_clip)
+    asyncio.create_task(_poll_remotion_render(render_id))
 
+    return {"render_id": render_id, "status": "queued"}
+
+
+async def _poll_remotion_render(render_id: str):
+    job = remotion_jobs.get(render_id)
+    if not job:
+        return
+    job["status"] = "processing"
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{RENDER_SERVICE_URL}/render",
+                json={"jobId": job["job_id"], "clipIndex": job["clip_index"], "props": job["remotion_props"]},
+            )
+            if resp.status_code != 202:
+                job["status"] = "failed"
+                job["error"] = f"Render service error: {resp.text}"
+                return
+            render_service_id = resp.json().get("renderId")
+
+            while True:
+                await asyncio.sleep(2)
+                try:
+                    status_resp = await client.get(f"{RENDER_SERVICE_URL}/render/{render_service_id}")
+                    if status_resp.status_code != 200:
+                        continue
+                    status_data = status_resp.json()
+                    if status_data.get("status") == "done":
+                        output_path = status_data.get("outputUrl")
+                        break
+                    elif status_data.get("status") == "error":
+                        job["status"] = "failed"
+                        job["error"] = f"Render failed: {status_data.get('error', 'Unknown error')}"
+                        return
+                except httpx.ConnectError:
+                    job["status"] = "failed"
+                    job["error"] = "Render service disconnected during render"
+                    return
+
+        final_path = os.path.join(job["output_dir"], job["output_filename"])
+        shutil.copy2(output_path, final_path)
+
+        new_clip = dict(job["clip_data"])
+        parent_clip_id = job["clip_data"].get("clip_id", job["clip_index"] + 1)
+        base_id = str(parent_clip_id).split("-")[0]
+        creations = _load_creations()
+        new_clip["clip_id"] = _get_next_clip_version(creations, job["job_id"], int(base_id))
+        new_clip["video_url"] = f"/videos/{job['job_id']}/{job['output_filename']}"
+        new_clip["derived"] = True
+        new_clip["derived_from_clip_index"] = job["clip_index"]
+        rp = job["remotion_props"]
+        has_hook = rp.get("hook") is not None
+        has_image = rp.get("imageOverlay") is not None
+        derived_types = []
+        if has_hook:
+            derived_types.append("hook")
+        if has_image:
+            derived_types.append("overlay")
+        if not derived_types:
+            derived_types.append("subtitle")
+        new_clip["derived_type"] = "remotion_" + "_".join(derived_types)
+
+        _append_clip_to_creation(job["job_id"], new_clip)
+
+        job["status"] = "completed"
+        job["result"] = {
+            "new_video_url": f"/videos/{job['job_id']}/{job['output_filename']}",
+            "new_clip": new_clip,
+        }
+    except Exception as e:
+        job["status"] = "failed"
+        job["error"] = str(e)
+
+
+@app.get("/api/remotion/status/{render_id}")
+async def remotion_status(render_id: str):
+    job = remotion_jobs.get(render_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Render job not found")
     return {
-        "success": True,
-        "new_video_url": f"/videos/{req.job_id}/{output_filename}",
-        "new_clip": new_clip,
+        "status": job["status"],
+        "result": job.get("result"),
+        "error": job.get("error"),
     }
 
 

@@ -311,7 +311,7 @@ export default function ResultCard({
     setIsSubtitling(true);
     setEditError(null);
     try {
-      const res = await fetch(getApiUrl('/api/remotion/subtitle'), {
+      const res = await fetch(getApiUrl('/api/remotion/submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -349,10 +349,29 @@ export default function ResultCard({
         catch (e) { throw new Error(errText); }
       }
 
-      const data = await res.json();
-      if (data.new_video_url) {
+      const { render_id } = await res.json();
+
+      // Poll for completion
+      let done = false;
+      let result = null;
+      while (!done) {
+        await new Promise(r => setTimeout(r, 2000));
+        const statusRes = await fetch(getApiUrl(`/api/remotion/status/${render_id}`));
+        if (!statusRes.ok) {
+          throw new Error('Failed to poll render status');
+        }
+        const statusData = await statusRes.json();
+        if (statusData.status === 'completed') {
+          result = statusData.result;
+          done = true;
+        } else if (statusData.status === 'failed') {
+          throw new Error(statusData.error || 'Render failed');
+        }
+      }
+
+      if (result?.new_video_url) {
         try {
-          const downloadRes = await fetch(getApiUrl(data.new_video_url));
+          const downloadRes = await fetch(getApiUrl(result.new_video_url));
           if (downloadRes.ok) {
             const blob = await downloadRes.blob();
             const url = window.URL.createObjectURL(blob);
