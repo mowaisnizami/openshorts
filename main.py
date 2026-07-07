@@ -25,6 +25,13 @@ warnings.filterwarnings("ignore", category=UserWarning, module='google.protobuf'
 # Load environment variables
 load_dotenv()
 
+# --- DB access (optional — file fallback if unavailable) ---
+try:
+    import admin_db
+    _db_available = True
+except Exception:
+    _db_available = False
+
 # --- Constants ---
 ASPECT_RATIO = 9 / 16
 
@@ -67,7 +74,7 @@ OUTPUT — RETURN ONLY VALID JSON (no markdown, no comments). Order clips by pre
 }}
 """
 
-def update_progress(output_dir, step, progress, **extra):
+def update_progress(output_dir, step, progress, job_id=None, **extra):
     """Write current progress to a status file so app.py can poll it."""
     if not output_dir:
         return
@@ -75,6 +82,14 @@ def update_progress(output_dir, step, progress, **extra):
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "progress.json"), 'w') as f:
         json.dump(data, f)
+    if _db_available:
+        if job_id is None:
+            job_id = os.path.basename(os.path.normpath(output_dir))
+        if job_id:
+            try:
+                admin_db.set_creation_progress(job_id, step, progress)
+            except Exception:
+                pass
     print(f"   📊 Progress: {step} ({progress}%)")
 
 
@@ -1043,6 +1058,7 @@ if __name__ == '__main__':
     input_group.add_argument('-u', '--url', type=str, help="YouTube URL to download and process.")
     
     parser.add_argument('-o', '--output', type=str, help="Output directory or file (if processing whole video).")
+    parser.add_argument('--job-id', type=str, help="Job ID for DB persistence.")
     parser.add_argument('--keep-original', action='store_true', help="Keep the downloaded YouTube video.")
     parser.add_argument('--skip-analysis', action='store_true', help="Skip AI analysis and convert the whole video.")
     parser.add_argument('--skip-transcribe', action='store_true', help="Skip download & transcription; load transcript from output dir.")
@@ -1119,6 +1135,19 @@ if __name__ == '__main__':
             with open(transcript_file, 'w') as f:
                 json.dump(transcript, f, indent=2)
             print(f"   Saved transcript to {transcript_file}")
+            if _db_available and args.job_id:
+                try:
+                    creation_id = admin_db._resolve_creation_id(args.job_id)
+                    if creation_id:
+                        admin_db.save_transcript(
+                            creation_id,
+                            transcript.get("language", "unknown"),
+                            transcript.get("text", ""),
+                            transcript.get("segments", []),
+                        )
+                        print(f"   Saved transcript to DB (creation_id={creation_id})")
+                except Exception as e:
+                    print(f"   ⚠️ DB transcript save skipped: {e}")
             update_progress(output_dir, "subtitled", 40)
 
         # Get duration
@@ -1151,6 +1180,21 @@ if __name__ == '__main__':
             with open(metadata_file, 'w') as f:
                 json.dump(fallback_meta, f, indent=2)
             print(f"   Saved fallback metadata to {metadata_file}")
+            if _db_available and args.job_id:
+                try:
+                    creation_id = admin_db._resolve_creation_id(args.job_id)
+                    if creation_id:
+                        clip_filename = f"{video_title}_clip_1.mp4"
+                        fallback_clip = {
+                            **fallback_meta["shorts"][0],
+                            "clip_index": 0,
+                            "clip_id": "1",
+                            "video_url": f"/videos/{args.job_id}/{clip_filename}",
+                        }
+                        admin_db.add_clip(creation_id, fallback_clip)
+                        print(f"   Saved fallback clip to DB")
+                except Exception as e:
+                    print(f"   ⚠️ DB fallback save skipped: {e}")
         else:
             print(f"🔥 Found {len(clips_data['shorts'])} viral clips!")
             
@@ -1160,6 +1204,23 @@ if __name__ == '__main__':
             with open(metadata_file, 'w') as f:
                 json.dump(clips_data, f, indent=2)
             print(f"   Saved metadata to {metadata_file}")
+            if _db_available and args.job_id:
+                try:
+                    creation_id = admin_db._resolve_creation_id(args.job_id)
+                    if creation_id:
+                        for idx, clip in enumerate(clips_data['shorts']):
+                            admin_db.add_clip(creation_id, {**clip, "clip_index": idx})
+                        ca = clips_data.get('cost_analysis')
+                        if ca:
+                            admin_db.save_cost_analysis(
+                                creation_id,
+                                ca.get('total_cost', 0),
+                                ca.get('breakdown', {}),
+                                ca.get('details', {}),
+                            )
+                        print(f"   Saved {len(clips_data['shorts'])} clips + cost_analysis to DB")
+                except Exception as e:
+                    print(f"   ⚠️ DB save skipped: {e}")
             update_progress(output_dir, "clipping", 70, total_clips=len(clips_data['shorts']))
 
             # Assign clip IDs
@@ -1201,6 +1262,17 @@ if __name__ == '__main__':
                 # Clean up temp cut
                 if os.path.exists(clip_temp_path):
                     os.remove(clip_temp_path)
+
+            if _db_available and args.job_id:
+                try:
+                    creation_id = admin_db._resolve_creation_id(args.job_id)
+                    if creation_id:
+                        for idx in range(len(clips_data['shorts'])):
+                            clip_filename = f"{video_title}_clip_{idx+1}.mp4"
+                            video_url = f"/videos/{args.job_id}/{clip_filename}"
+                            admin_db.update_clip_by_index(creation_id, idx, video_url=video_url)
+                except Exception as e:
+                    print(f"   ⚠️ DB clip URL update skipped: {e}")
 
         update_progress(output_dir, "completed", 100)
 

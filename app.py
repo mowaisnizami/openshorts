@@ -46,116 +46,6 @@ publish_jobs: Dict[str, Dict] = {}  # {publish_id: {status, result, error}}
 # Semester to limit concurrency to MAX_CONCURRENT_JOBS
 concurrency_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
-# Creations persistence
-CREATIONS_FILE = "creations.json"
-
-def _load_creations() -> List[Dict]:
-    if not os.path.exists(CREATIONS_FILE):
-        return []
-    try:
-        with open(CREATIONS_FILE, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
-
-def _write_creations(creations: List[Dict]):
-    try:
-        with open(CREATIONS_FILE, "w") as f:
-            json.dump(creations, f, indent=2)
-    except OSError:
-        pass
-
-def _get_next_clip_version(creations: List[Dict], job_id: str, base_id: int) -> str:
-    for entry in creations:
-        if entry["job_id"] == job_id:
-            max_version = 0
-            for clip in entry.get("clips", []):
-                cid = str(clip.get("clip_id", ""))
-                if cid == str(base_id) or cid.startswith(f"{base_id}-"):
-                    parts = cid.split("-")
-                    if len(parts) >= 2:
-                        try:
-                            max_version = max(max_version, int(parts[-1]))
-                        except ValueError:
-                            pass
-            return f"{base_id}-{max_version + 1}"
-    return f"{base_id}-1"
-
-def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None, status: str = "completed", metadata: Optional[Dict] = None):
-    source = ""
-    try:
-        main_idx = cmd.index("main.py")
-        for i in range(main_idx, len(cmd) - 1):
-            if cmd[i] in ("-u", "--url") and cmd[i + 1].startswith("http"):
-                source = cmd[i + 1]
-                break
-            if cmd[i] in ("-i", "--input"):
-                source = os.path.basename(cmd[i + 1])
-                break
-    except ValueError:
-        pass
-    creations = _load_creations()
-    artifact_urls = {
-        "transcript_file": f"/videos/{job_id}/transcript.json",
-        "prompt_file": f"/videos/{job_id}/prompt_sent.txt",
-        "response_file": f"/videos/{job_id}/gemini_response.json",
-    }
-    meta = metadata or {}
-    for existing in creations:
-        if existing["job_id"] == job_id:
-            existing["clips"] = clips
-            existing["status"] = status
-            if cost_analysis:
-                existing["cost_analysis"] = cost_analysis
-            existing.update(artifact_urls)
-            if meta:
-                existing.setdefault("metadata", {}).update(meta)
-            break
-    else:
-        entry = {
-            "job_id": job_id,
-            "source": source,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "clips": clips,
-            "cost_analysis": cost_analysis,
-            "status": status,
-            "step": "queued",
-            "progress_pct": 0,
-            "steps_history": [],
-            **artifact_urls,
-        }
-        if meta:
-            entry["metadata"] = meta
-        creations.insert(0, entry)
-    _write_creations(creations)
-
-
-def _set_creation_progress(job_id: str, step: str, progress_pct: int):
-    """Update step/progress for a creation record directly."""
-    creations = _load_creations()
-    for entry in creations:
-        if entry["job_id"] == job_id:
-            entry["step"] = step
-            entry["progress_pct"] = progress_pct
-            if "steps_history" not in entry:
-                entry["steps_history"] = []
-            if not entry["steps_history"] or entry["steps_history"][-1]["step"] != step:
-                entry["steps_history"].append({
-                    "step": step,
-                    "progress": progress_pct,
-                    "timestamp": time.time(),
-                })
-            break
-    _write_creations(creations)
-
-
-def _append_clip_to_creation(job_id: str, new_clip: Dict):
-    creations = _load_creations()
-    for existing in creations:
-        if existing["job_id"] == job_id:
-            existing.setdefault("clips", []).append(new_clip)
-            break
-    _write_creations(creations)
 
 def _relocate_root_job_artifacts(job_id: str, job_output_dir: str) -> bool:
     """
@@ -329,7 +219,7 @@ def enqueue_output(out, job_id):
         out.close()
 
 async def run_job(job_id, job_data):
-    """Executes the subprocess for a specific job."""
+    """Executes the subprocess for a specific job with DB persistence."""
     
     cmd = job_data['cmd']
     env = job_data['env']
@@ -337,152 +227,147 @@ async def run_job(job_id, job_data):
     
     jobs[job_id]['status'] = 'processing'
     jobs[job_id]['logs'].append("Job started by worker.")
+    
+    # Create DB creation record before spawning
+    try:
+        meta = job_data.get('metadata') or {}
+        source = ""
+        for i, arg in enumerate(cmd):
+            if arg in ("-u", "--url") and i + 1 < len(cmd) and cmd[i+1].startswith("http"):
+                source = cmd[i+1]
+                break
+            if arg in ("-i", "--input") and i + 1 < len(cmd):
+                source = os.path.basename(cmd[i+1])
+                break
+        admin_db.create_creation(
+            job_id=job_id,
+            source=source,
+            status="processing",
+            step="queued",
+            progress_pct=0,
+            metadata=meta,
+            user_id=meta.get("user_id"),
+            niche_id=meta.get("niche_id"),
+            yt_channel_id=meta.get("yt_channel_id"),
+            whop_channel_id=meta.get("whop_channel_id"),
+            whop_campaign_id=meta.get("whop_campaign_id"),
+        )
+    except Exception as e:
+        print(f"⚠️ DB creation record failed (non-fatal): {e}")
+
     print(f"🎬 [run_job] Executing command for {job_id}: {' '.join(cmd)}")
     
     try:
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, # Merge stderr to stdout
+            stderr=subprocess.STDOUT,
             env=env,
             cwd=os.getcwd()
         )
         
-        # We need to capture logs in a thread because Popen isn't async
         t_log = threading.Thread(target=enqueue_output, args=(process.stdout, job_id))
         t_log.daemon = True
         t_log.start()
         
-        # Async wait for process with incremental updates
-        start_wait = time.time()
         last_clip_count = 0
+        last_log_save = 0
         while process.poll() is None:
             await asyncio.sleep(2)
             
-            # Check for partial results every 2 seconds
-            # Look for metadata file
+            # Poll DB for progress updates (written by main.py)
             try:
-                json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-                if json_files:
-                    target_json = json_files[0]
-                    # Read metadata (it might be being written to, so simple try/except or just read)
-                    # Use a lock or just robust read? json.load might fail if file is partial.
-                    # Usually main.py writes it once at start (based on my review).
-                    if os.path.getsize(target_json) > 0:
-                        with open(target_json, 'r') as f:
-                            data = json.load(f)
-                            
-                        base_name = os.path.basename(target_json).replace('_metadata.json', '')
-                        clips = data.get('shorts', [])
-                        cost_analysis = data.get('cost_analysis')
-                        
-                        # Check which clips actually exist on disk
-                        ready_clips = []
-                        for i, clip in enumerate(clips):
-                             clip_filename = f"{base_name}_clip_{i+1}.mp4"
-                             clip_path = os.path.join(output_dir, clip_filename)
-                             if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
-                                 # Checking if file is growing? For now assume if it exists and main.py moves it there, it's done.
-                                 # main.py writes to temp_... then moves to final name. So presence means ready!
-                                 clip['video_url'] = f"/videos/{job_id}/{clip_filename}"
-                                 ready_clips.append(clip)
-                        
-                        if len(ready_clips) > last_clip_count:
-                            last_clip_count = len(ready_clips)
-                            _save_creation(job_id, job_data['cmd'], ready_clips, cost_analysis, status="processing", metadata=job_data.get('metadata'))
-                        
-                        if ready_clips:
-                             jobs[job_id]['result'] = {'clips': ready_clips, 'cost_analysis': cost_analysis}
-            except Exception as e:
-                # Ignore read errors during processing
-                pass
-
-            # Poll progress.json for step tracking
-            try:
-                progress_file = os.path.join(output_dir, "progress.json")
-                if os.path.exists(progress_file):
-                    with open(progress_file, 'r') as f:
-                        pdata = json.load(f)
-                    new_step = pdata.get("step")
-                    new_progress = pdata.get("progress")
-                    if new_step:
-                        creations = _load_creations()
-                        for entry in creations:
-                            if entry["job_id"] == job_id:
-                                entry["step"] = new_step
-                                entry["progress_pct"] = new_progress
-                                if "steps_history" not in entry:
-                                    entry["steps_history"] = []
-                                if not entry["steps_history"] or entry["steps_history"][-1]["step"] != new_step:
-                                    entry["steps_history"].append({
-                                        "step": new_step,
-                                        "progress": new_progress,
-                                        "timestamp": pdata.get("timestamp", time.time()),
-                                    })
-                                break
-                        with open(CREATIONS_FILE, "w") as f:
-                            json.dump(creations, f, indent=2)
+                creation = admin_db.get_creation(job_id)
+                if creation:
+                    clips = creation.get("clips", [])
+                    if len(clips) > last_clip_count:
+                        last_clip_count = len(clips)
+                        jobs[job_id]['result'] = {
+                            'clips': clips,
+                            'cost_analysis': creation.get("cost_analysis"),
+                        }
             except Exception:
                 pass
+
+            # Periodically persist logs to DB
+            if job_id in jobs and len(jobs[job_id]['logs']) > last_log_save:
+                last_log_save = len(jobs[job_id]['logs'])
+                try:
+                    admin_db.update_creation_logs(job_id, jobs[job_id]['logs'])
+                except Exception:
+                    pass
 
         returncode = process.returncode
         
         if returncode == 0:
             jobs[job_id]['status'] = 'completed'
             jobs[job_id]['logs'].append("Process finished successfully.")
+            # Persist final logs to DB
+            try:
+                admin_db.update_creation_logs(job_id, jobs[job_id]['logs'])
+            except Exception:
+                pass
             
             # Start S3 upload in background (silent, non-blocking)
             loop = asyncio.get_event_loop()
             loop.run_in_executor(None, upload_job_artifacts, output_dir, job_id)
             
-            # Find result JSON
-            json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-            if not json_files:
-                # Backward-compat rescue if outputs were written to OUTPUT_DIR root
-                if _relocate_root_job_artifacts(job_id, output_dir):
+            # Load final creation from DB
+            try:
+                creation = admin_db.get_creation(job_id)
+                if creation:
+                    jobs[job_id]['result'] = {
+                        'clips': creation.get("clips", []),
+                        'cost_analysis': creation.get("cost_analysis"),
+                    }
+                    # Update original_video_title from the metadata filename if available
                     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-            if json_files:
-                target_json = json_files[0] 
-                with open(target_json, 'r') as f:
-                    data = json.load(f)
-                
-                # Enhance result with video URLs
-                base_name = os.path.basename(target_json).replace('_metadata.json', '')
-                clips = data.get('shorts', [])
-                cost_analysis = data.get('cost_analysis')
-
-                for i, clip in enumerate(clips):
-                     clip_filename = f"{base_name}_clip_{i+1}.mp4"
-                     clip['video_url'] = f"/videos/{job_id}/{clip_filename}"
-                
-                jobs[job_id]['result'] = {'clips': clips, 'cost_analysis': cost_analysis}
-                _save_creation(job_id, job_data['cmd'], clips, cost_analysis, status="completed", metadata=job_data.get('metadata'))
-                _set_creation_progress(job_id, "completed", 100)
-                # Store original video title from the metadata filename
-                if base_name and base_name != job_id:
-                    creations = _load_creations()
-                    for entry in creations:
-                        if entry["job_id"] == job_id:
-                            entry["original_video_title"] = base_name
-                            break
-                    try:
-                        with open(CREATIONS_FILE, "w") as f:
-                            json.dump(creations, f, indent=2)
-                    except OSError:
-                        pass
-            else:
-                 jobs[job_id]['status'] = 'failed'
-                 jobs[job_id]['logs'].append("No metadata file generated.")
-                 _set_creation_progress(job_id, "failed", 0)
+                    if json_files:
+                        base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
+                        if base_name and base_name != job_id:
+                            admin_db.update_creation(job_id, original_video_title=base_name)
+                else:
+                    # Fallback: read from metadata file
+                    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+                    if not json_files and _relocate_root_job_artifacts(job_id, output_dir):
+                        json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+                    if json_files:
+                        with open(json_files[0], 'r') as f:
+                            data = json.load(f)
+                        base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
+                        clips = data.get('shorts', [])
+                        for i, clip in enumerate(clips):
+                            clip['video_url'] = f"/videos/{job_id}/{base_name}_clip_{i+1}.mp4"
+                        jobs[job_id]['result'] = {'clips': clips, 'cost_analysis': data.get('cost_analysis')}
+            except Exception as e:
+                print(f"⚠️ DB read failed at completion: {e}")
+                # Fallback to file-based read
+                json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+                if json_files:
+                    with open(json_files[0], 'r') as f:
+                        data = json.load(f)
+                    base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
+                    clips = data.get('shorts', [])
+                    for i, clip in enumerate(clips):
+                        clip['video_url'] = f"/videos/{job_id}/{base_name}_clip_{i+1}.mp4"
+                    jobs[job_id]['result'] = {'clips': clips, 'cost_analysis': data.get('cost_analysis')}
         else:
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['logs'].append(f"Process failed with exit code {returncode}")
-            _set_creation_progress(job_id, "failed", 0)
+            try:
+                admin_db.update_creation(job_id, status="failed", step="failed")
+                admin_db.update_creation_logs(job_id, jobs[job_id]['logs'])
+            except Exception:
+                pass
             
     except Exception as e:
         jobs[job_id]['status'] = 'failed'
         jobs[job_id]['logs'].append(f"Execution error: {str(e)}")
-        _set_creation_progress(job_id, "failed", 0)
+        try:
+            admin_db.update_creation(job_id, status="failed", step="failed")
+            admin_db.update_creation_logs(job_id, jobs[job_id]['logs'])
+        except Exception:
+            pass
 
 @app.get("/api/config")
 async def get_config():
@@ -586,6 +471,7 @@ async def process_endpoint(
         cmd.extend(["-i", input_path])
 
     cmd.extend(["-o", job_output_dir])
+    cmd.extend(["--job-id", job_id])
 
     print(f"[attestation] job={job_id} ip={attestation['ip']} source={attestation['source']} ack=true")
 
@@ -611,12 +497,7 @@ async def retry_process_endpoint(job_id: str, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
 
-    creations = _load_creations()
-    creation = None
-    for entry in creations:
-        if entry["job_id"] == job_id:
-            creation = entry
-            break
+    creation = admin_db.get_creation(job_id)
 
     if not creation:
         raise HTTPException(status_code=404, detail="Creation not found")
@@ -641,22 +522,13 @@ async def retry_process_endpoint(job_id: str, request: Request):
             raise HTTPException(status_code=400, detail=f"Original upload file not found: {input_path}")
         cmd.extend(["-i", input_path])
 
-    cmd.extend(["-o", output_dir, "--skip-transcribe"])
+    cmd.extend(["-o", output_dir, "--skip-transcribe", "--job-id", job_id])
 
     env = os.environ.copy()
     env["GEMINI_API_KEY"] = api_key
 
-    # Reset creation entry
-    creation["clips"] = []
-    creation["status"] = "processing"
-    creation["step"] = "started"
-    creation["progress_pct"] = 0
-    creation["steps_history"] = []
-    try:
-        with open(CREATIONS_FILE, "w") as f:
-            json.dump(creations, f, indent=2)
-    except OSError:
-        pass
+    # Reset creation in DB
+    admin_db.update_creation(job_id, status="processing", step="started", progress_pct=0)
 
     # Enqueue the retry job
     jobs[job_id] = {
@@ -675,15 +547,25 @@ async def retry_process_endpoint(job_id: str, request: Request):
 
 @app.get("/api/status/{job_id}")
 async def get_status(job_id: str):
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = jobs[job_id]
-    return {
-        "status": job['status'],
-        "logs": job['logs'],
-        "result": job.get('result')
-    }
+    if job_id in jobs:
+        job = jobs[job_id]
+        return {
+            "status": job['status'],
+            "logs": job['logs'],
+            "result": job.get('result')
+        }
+    # Fallback: read from DB (for completed/historical jobs not in memory)
+    try:
+        creation = admin_db.get_creation(job_id)
+        if creation:
+            return {
+                "status": creation.get("status", "unknown"),
+                "logs": creation.get("logs", []),
+                "result": {"clips": creation.get("clips", []), "cost_analysis": creation.get("cost_analysis")},
+            }
+    except Exception:
+        pass
+    raise HTTPException(status_code=404, detail="Job not found")
 
 @app.get("/api/creations")
 async def list_creations(
@@ -696,20 +578,13 @@ async def list_creations(
     whop_campaign_id: Optional[int] = Query(None),
 ):
     limit = min(max(1, limit), 100)
-    creations = _load_creations()
-    if user_id is not None:
-        creations = [c for c in creations if c.get("metadata", {}).get("user_id") == user_id]
-    if niche_id is not None:
-        creations = [c for c in creations if c.get("metadata", {}).get("niche_id") == niche_id]
-    if yt_channel_id is not None:
-        creations = [c for c in creations if c.get("metadata", {}).get("yt_channel_id") == yt_channel_id]
-    if whop_channel_id is not None:
-        creations = [c for c in creations if c.get("metadata", {}).get("whop_channel_id") == whop_channel_id]
-    if whop_campaign_id is not None:
-        creations = [c for c in creations if c.get("metadata", {}).get("whop_campaign_id") == whop_campaign_id]
-    total = len(creations)
-    page = creations[offset:offset + limit]
-    return {"creations": page, "has_more": (offset + limit) < total, "total": total}
+    creations, total = admin_db.get_creations(
+        limit=limit, offset=offset,
+        user_id=user_id, niche_id=niche_id,
+        yt_channel_id=yt_channel_id, whop_channel_id=whop_channel_id,
+        whop_campaign_id=whop_campaign_id,
+    )
+    return {"creations": creations, "has_more": (offset + limit) < total, "total": total}
 
 
 @app.get("/api/campaigns")
@@ -719,19 +594,17 @@ async def list_public_campaigns():
 
 @app.get("/api/creations/{job_id}")
 async def get_creation(job_id: str):
-    creations = _load_creations()
-    for entry in creations:
-        if entry["job_id"] == job_id:
-            return entry
-    raise HTTPException(status_code=404, detail="Creation not found")
+    creation = admin_db.get_creation(job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
+    return creation
+
 
 @app.delete("/api/creations/{job_id}")
 async def delete_creation(job_id: str):
-    creations = _load_creations()
-    filtered = [e for e in creations if e["job_id"] != job_id]
-    if len(filtered) == len(creations):
-        raise HTTPException(status_code=404, detail="Creation not found")
-    _write_creations(filtered)
+    if not admin_db.delete_creation(job_id):
+        # Fallback: try filesystem-only deletion
+        pass
     job_path = os.path.join(OUTPUT_DIR, job_id)
     if os.path.isdir(job_path):
         shutil.rmtree(job_path, ignore_errors=True)
@@ -740,57 +613,76 @@ async def delete_creation(job_id: str):
 
 @app.delete("/api/creations/{job_id}/clips/{clip_index}")
 async def delete_clip(job_id: str, clip_index: int):
-    creations = _load_creations()
-    for entry in creations:
-        if entry["job_id"] == job_id:
-            clips = entry.get("clips", [])
-            if clip_index < 0 or clip_index >= len(clips):
-                raise HTTPException(status_code=404, detail="Clip not found")
-            clip = entry["clips"].pop(clip_index)
-            if clip.get("video_url"):
-                video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-            _write_creations(creations)
-            return {"status": "deleted"}
-    raise HTTPException(status_code=404, detail="Creation not found")
+    creation = admin_db.get_creation(job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
+    clips = creation.get("clips", [])
+    if clip_index < 0 or clip_index >= len(clips):
+        raise HTTPException(status_code=404, detail="Clip not found")
+    clip = clips[clip_index]
+    if clip.get("video_url"):
+        video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
+        if os.path.exists(video_path):
+            os.remove(video_path)
+    try:
+        creation_id = admin_db._resolve_creation_id(job_id)
+        if creation_id:
+            db_clips = admin_db._fetchall(
+                "SELECT id FROM clips WHERE creation_id = %s ORDER BY clip_index", (creation_id,)
+            )
+            if clip_index < len(db_clips):
+                admin_db.delete_clip(db_clips[clip_index]["id"])
+    except Exception:
+        pass
+    return {"status": "deleted"}
 
 
 @app.delete("/api/creations/{job_id}/clips/{clip_index}/video")
 async def delete_clip_video(job_id: str, clip_index: int):
-    creations = _load_creations()
-    for entry in creations:
-        if entry["job_id"] == job_id:
-            clips = entry.get("clips", [])
-            if clip_index < 0 or clip_index >= len(clips):
-                raise HTTPException(status_code=404, detail="Clip not found")
-            clip = entry["clips"][clip_index]
-            if clip.get("video_url"):
-                video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-                clip["video_url"] = None
-                clip["video_deleted"] = True
-            _write_creations(creations)
-            return {"status": "video_deleted"}
-    raise HTTPException(status_code=404, detail="Creation not found")
+    creation = admin_db.get_creation(job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
+    clips = creation.get("clips", [])
+    if clip_index < 0 or clip_index >= len(clips):
+        raise HTTPException(status_code=404, detail="Clip not found")
+    clip = clips[clip_index]
+    if clip.get("video_url"):
+        video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
+        if os.path.exists(video_path):
+            os.remove(video_path)
+    try:
+        creation_id = admin_db._resolve_creation_id(job_id)
+        if creation_id:
+            db_clips = admin_db._fetchall(
+                "SELECT id FROM clips WHERE creation_id = %s ORDER BY clip_index", (creation_id,)
+            )
+            if clip_index < len(db_clips):
+                admin_db.update_clip(db_clips[clip_index]["id"], video_url=None, video_deleted=True)
+    except Exception:
+        pass
+    return {"status": "video_deleted"}
 
 
 @app.delete("/api/creations/{job_id}/videos")
 async def delete_creation_videos(job_id: str):
-    creations = _load_creations()
-    for entry in creations:
-        if entry["job_id"] == job_id:
-            for clip in entry.get("clips", []):
-                if clip.get("video_url"):
-                    video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
-                    if os.path.exists(video_path):
-                        os.remove(video_path)
-                    clip["video_url"] = None
-                    clip["video_deleted"] = True
-            _write_creations(creations)
-            return {"status": "videos_deleted"}
-    raise HTTPException(status_code=404, detail="Creation not found")
+    creation = admin_db.get_creation(job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
+    for clip in creation.get("clips", []):
+        if clip.get("video_url"):
+            video_path = os.path.join(OUTPUT_DIR, job_id, os.path.basename(clip["video_url"]))
+            if os.path.exists(video_path):
+                os.remove(video_path)
+    try:
+        creation_id = admin_db._resolve_creation_id(job_id)
+        if creation_id:
+            admin_db._execute(
+                "UPDATE clips SET video_url = NULL, video_deleted = TRUE WHERE creation_id = %s",
+                (creation_id,),
+            )
+    except Exception:
+        pass
+    return {"status": "videos_deleted"}
 
 
 from editor import VideoEditor
@@ -871,14 +763,18 @@ async def edit_clip(
                 duration = frame_count / fps if fps else 0
                 cap.release()
                 
-                # Load transcript from metadata
+                # Load transcript from DB (or fallback to metadata file)
                 transcript = None
                 try:
-                    meta_files = glob.glob(os.path.join(OUTPUT_DIR, req.job_id, "*_metadata.json"))
-                    if meta_files:
-                        with open(meta_files[0], 'r') as f:
-                            data = json.load(f)
-                            transcript = data.get('transcript')
+                    creation_id = admin_db._resolve_creation_id(req.job_id)
+                    if creation_id:
+                        transcript = admin_db.get_transcript(creation_id)
+                    if not transcript:
+                        meta_files = glob.glob(os.path.join(OUTPUT_DIR, req.job_id, "*_metadata.json"))
+                        if meta_files:
+                            with open(meta_files[0], 'r') as f:
+                                data = json.load(f)
+                                transcript = data.get('transcript')
                 except Exception as e:
                     print(f"⚠️ Could not load transcript for editing context: {e}")
 
@@ -945,29 +841,33 @@ class SubtitleRequest(BaseModel):
 @app.get("/api/clip/{job_id}/{clip_index}/transcript")
 async def get_clip_transcript(job_id: str, clip_index: int):
     """Return word-level captions for a specific clip, formatted for Remotion."""
-    output_dir = os.path.join(OUTPUT_DIR, job_id)
-    if not os.path.isdir(output_dir):
+    creation = admin_db.get_creation(job_id)
+    if not creation:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-
-    if not json_files:
-        raise HTTPException(status_code=404, detail="Metadata not found")
-
-    with open(json_files[0], 'r') as f:
-        data = json.load(f)
-
-    transcript = data.get('transcript')
-    if not transcript:
-        raise HTTPException(status_code=400, detail="Transcript not found in metadata")
-
-    clips = data.get('shorts', [])
+    clips = creation.get("clips", [])
     if clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
 
     clip_data = clips[clip_index]
     clip_start = clip_data.get('start', 0)
     clip_end = clip_data.get('end', 0)
+
+    creation_id = admin_db._resolve_creation_id(job_id)
+    transcript = None
+    if creation_id:
+        transcript = admin_db.get_transcript(creation_id)
+    if not transcript:
+        # Fallback: try reading from metadata file on disk
+        output_dir = os.path.join(OUTPUT_DIR, job_id)
+        if os.path.isdir(output_dir):
+            json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+            if json_files:
+                with open(json_files[0], 'r') as f:
+                    data = json.load(f)
+                transcript = data.get('transcript')
+    if not transcript:
+        raise HTTPException(status_code=400, detail="Transcript not found")
 
     # Extract words within clip range and convert to CaptionWord format
     captions = []
@@ -1051,18 +951,17 @@ async def remotion_submit(req: RemotionSubtitleRequest):
     if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
 
-    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-    if not json_files:
-        raise HTTPException(status_code=404, detail="Metadata not found")
+    # Load creation + transcript from DB
+    creation = admin_db.get_creation(req.job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found in DB")
 
-    with open(json_files[0], 'r') as f:
-        data = json.load(f)
+    creation_id = admin_db._resolve_creation_id(req.job_id)
+    transcript = None
+    if creation_id:
+        transcript = admin_db.get_transcript(creation_id)
 
-    transcript = data.get('transcript')
-    if not transcript:
-        raise HTTPException(status_code=400, detail="Transcript not found")
-
-    clips = data.get('shorts', [])
+    clips = creation.get("shorts", [])
     if req.clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
 
@@ -1074,14 +973,16 @@ async def remotion_submit(req: RemotionSubtitleRequest):
     else:
         filename = clip_data.get('video_url', '').split('/')[-1]
         if not filename:
-            base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
-            filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
+            base_name = f"{req.job_id}_clip_{req.clip_index+1}"
+            filename = f"{base_name}.mp4"
 
     input_path = os.path.join(output_dir, filename)
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
 
     # Extract words within clip range
+    if not transcript:
+        raise HTTPException(status_code=400, detail="Transcript not found")
     clip_start = clip_data.get('start', 0)
     clip_end = clip_data.get('end', 0)
     words = []
@@ -1217,8 +1118,9 @@ async def _poll_remotion_render(render_id: str):
         new_clip = dict(job["clip_data"])
         parent_clip_id = job["clip_data"].get("clip_id", job["clip_index"] + 1)
         base_id = str(parent_clip_id).split("-")[0]
-        creations = _load_creations()
-        new_clip["clip_id"] = _get_next_clip_version(creations, job["job_id"], int(base_id))
+        creation_id = admin_db._resolve_creation_id(job["job_id"])
+        if creation_id:
+            new_clip["clip_id"] = admin_db.get_next_clip_version(creation_id, int(base_id))
         new_clip["video_url"] = f"/videos/{job['job_id']}/{job['output_filename']}"
         new_clip["derived"] = True
         new_clip["derived_from_clip_index"] = job["clip_index"]
@@ -1234,7 +1136,8 @@ async def _poll_remotion_render(render_id: str):
             derived_types.append("subtitle")
         new_clip["derived_type"] = "remotion_" + "_".join(derived_types)
 
-        _append_clip_to_creation(job["job_id"], new_clip)
+        if creation_id:
+            admin_db.add_clip(creation_id, new_clip)
 
         job["status"] = "completed"
         job["result"] = {
@@ -1332,14 +1235,18 @@ async def generate_effects_config(
                 if duration == 0:
                     duration = float(probe_data.get('format', {}).get('duration', 0))
 
-                # Load transcript from metadata
+                # Load transcript from DB (or fallback to metadata file)
                 transcript = None
                 try:
-                    meta_files = glob.glob(os.path.join(OUTPUT_DIR, req.job_id, "*_metadata.json"))
-                    if meta_files:
-                        with open(meta_files[0], 'r') as f:
-                            data = json.load(f)
-                            transcript = data.get('transcript')
+                    creation_id = admin_db._resolve_creation_id(req.job_id)
+                    if creation_id:
+                        transcript = admin_db.get_transcript(creation_id)
+                    if not transcript:
+                        meta_files = glob.glob(os.path.join(OUTPUT_DIR, req.job_id, "*_metadata.json"))
+                        if meta_files:
+                            with open(meta_files[0], 'r') as f:
+                                data = json.load(f)
+                                transcript = data.get('transcript')
                 except Exception as e:
                     print(f"⚠️ Could not load transcript for effects config: {e}")
 
@@ -1373,104 +1280,95 @@ async def add_subtitles(req: SubtitleRequest):
     output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-    
-    if not json_files:
-        raise HTTPException(status_code=404, detail="Metadata not found")
-        
-    with open(json_files[0], 'r') as f:
-        data = json.load(f)
-        
-    transcript = data.get('transcript')
-    if not transcript:
-        raise HTTPException(status_code=400, detail="Transcript not found in metadata. Please process a new video.")
-        
-    clips = data.get('shorts', [])
+
+    creation = admin_db.get_creation(req.job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
+
+    creation_id = admin_db._resolve_creation_id(req.job_id)
+    transcript = None
+    if creation_id:
+        transcript = admin_db.get_transcript(creation_id)
+
+    clips = creation.get("clips", [])
     if req.clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
-        
+
     clip_data = clips[req.clip_index]
-    
+
     # Video Path
     if req.input_filename:
-        # Use chained file
         filename = os.path.basename(req.input_filename)
     else:
-        # Fallback to standard naming
         filename = clip_data.get('video_url', '').split('/')[-1]
         if not filename:
-             base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
-             filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
-         
+             filename = f"clip_{req.clip_index+1}.mp4"
+
     input_path = os.path.join(output_dir, filename)
     if not os.path.exists(input_path):
-        # Try looking for edited version if url implied it?
-        # Just fail if not found.
         raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
-        
+
     # Define outputs
     srt_filename = f"subs_{req.clip_index}_{int(time.time())}.srt"
     srt_path = os.path.join(output_dir, srt_filename)
-    
-    # Output video
-    # We create a new file "subtitled_..."
+
     output_filename = f"subtitled_{filename}"
     output_path = os.path.join(output_dir, output_filename)
-    
+
     try:
-        # 1. Generate SRT
-        # Check if this is a dubbed video - if so, transcribe it fresh
         is_dubbed = filename.startswith("translated_")
 
         if is_dubbed:
-            print(f"🎙️ Dubbed video detected, transcribing audio for subtitles...")
             def run_transcribe_srt():
                 return generate_srt_from_video(input_path, srt_path)
-
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(None, run_transcribe_srt)
         else:
+            if not transcript:
+                raise HTTPException(status_code=400, detail="Transcript not found")
             success = generate_srt(transcript, clip_data['start'], clip_data['end'], srt_path)
 
         if not success:
              raise HTTPException(status_code=400, detail="No words found for this clip range.")
 
-        # 2. Burn Subtitles
-        # Run in thread pool
         def run_burn():
              burn_subtitles(input_path, srt_path, output_path,
                            alignment=req.position, fontsize=req.font_size,
                            font_name=req.font_name, font_color=req.font_color,
                            border_color=req.border_color, border_width=req.border_width,
                            bg_color=req.bg_color, bg_opacity=req.bg_opacity)
-        
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, run_burn)
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Subtitle Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        
-    # 3. Update Result and Metadata
-    # Update InMemory Jobs (if still alive)
+
+    # Update in-memory jobs
     if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
          jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
-    
-    # Update Metadata on Disk (Persistence)
+
+    # Update DB clip video_url
+    if creation_id:
+        admin_db.update_clip_by_index(creation_id, req.clip_index, video_url=f"/videos/{req.job_id}/{output_filename}")
+
+    # Also persist to metadata file for backward compat
     try:
-        if req.clip_index < len(clips):
-            clips[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
-            # Update the main data structure
-            data['shorts'] = clips
-            
-            # Write back
-            with open(json_files[0], 'w') as f:
-                json.dump(data, f, indent=4)
-                print(f"✅ Metadata updated with subtitled video for clip {req.clip_index}")
-    except Exception as e:
-        print(f"⚠️ Failed to update metadata.json: {e}")
-        # Non-critical, but good for persistence
+        json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+        if json_files:
+            with open(json_files[0], 'r') as f:
+                data = json.load(f)
+            shorts = data.get('shorts', [])
+            if req.clip_index < len(shorts):
+                shorts[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+                data['shorts'] = shorts
+                with open(json_files[0], 'w') as f:
+                    json.dump(data, f, indent=4)
+    except Exception:
+        pass
 
     return {
         "success": True,
@@ -1490,69 +1388,71 @@ async def add_hook(req: HookRequest):
     output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-    
-    if not json_files:
-        raise HTTPException(status_code=404, detail="Metadata not found")
-        
-    with open(json_files[0], 'r') as f:
-        data = json.load(f)
-        
-    clips = data.get('shorts', [])
+
+    creation = admin_db.get_creation(req.job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
+
+    creation_id = admin_db._resolve_creation_id(req.job_id)
+    clips = creation.get("clips", [])
     if req.clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
-        
+
     clip_data = clips[req.clip_index]
-    
+
     # Video Path
     if req.input_filename:
         filename = os.path.basename(req.input_filename)
     else:
         filename = clip_data.get('video_url', '').split('/')[-1]
         if not filename:
-             base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
-             filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
-         
+             filename = f"clip_{req.clip_index+1}.mp4"
+
     input_path = os.path.join(output_dir, filename)
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
-        
+
     # Output video
     output_filename = f"hook_{filename}"
     output_path = os.path.join(output_dir, output_filename)
-    
+
     # Map Size to Scale
     size_map = {"S": 0.8, "M": 1.0, "L": 1.3}
     font_scale = size_map.get(req.size, 1.0)
-    
+
     try:
-        # Run in thread pool
         def run_hook():
              add_hook_to_video(input_path, req.text, output_path, position=req.position, font_scale=font_scale)
-        
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, run_hook)
-        
+
     except Exception as e:
         print(f"❌ Hook Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        
-    # Update Persistence (Same logic as subtitles)
+
     # Update InMemory Jobs (if still alive)
     if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
          jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
-    
-    # Update Metadata on Disk
+
+    # Update DB clip video_url
+    if creation_id:
+        admin_db.update_clip_by_index(creation_id, req.clip_index, video_url=f"/videos/{req.job_id}/{output_filename}")
+
+    # Also persist to metadata file for backward compat
     try:
-        if req.clip_index < len(clips):
-            clips[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
-            data['shorts'] = clips
-            with open(json_files[0], 'w') as f:
-                json.dump(data, f, indent=4)
-                print(f"✅ Metadata updated with hook video for clip {req.clip_index}")
-    except Exception as e:
-        print(f"⚠️ Failed to update metadata.json: {e}")
+        json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+        if json_files:
+            with open(json_files[0], 'r') as f:
+                data = json.load(f)
+            shorts = data.get('shorts', [])
+            if req.clip_index < len(shorts):
+                shorts[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+                data['shorts'] = shorts
+                with open(json_files[0], 'w') as f:
+                    json.dump(data, f, indent=4)
+    except Exception:
+        pass
 
     return {
         "success": True,
@@ -1584,15 +1484,12 @@ async def translate_clip(
     if not os.path.isdir(output_dir):
         raise HTTPException(status_code=404, detail="Job not found")
 
-    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+    creation = admin_db.get_creation(req.job_id)
+    if not creation:
+        raise HTTPException(status_code=404, detail="Creation not found")
 
-    if not json_files:
-        raise HTTPException(status_code=404, detail="Metadata not found")
-
-    with open(json_files[0], 'r') as f:
-        data = json.load(f)
-
-    clips = data.get('shorts', [])
+    creation_id = admin_db._resolve_creation_id(req.job_id)
+    clips = creation.get("clips", [])
     if req.clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
 
@@ -1604,8 +1501,7 @@ async def translate_clip(
     else:
         filename = clip_data.get('video_url', '').split('/')[-1]
         if not filename:
-             base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
-             filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
+             filename = f"clip_{req.clip_index+1}.mp4"
 
     input_path = os.path.join(output_dir, filename)
     if not os.path.exists(input_path):
@@ -1617,7 +1513,6 @@ async def translate_clip(
     output_path = os.path.join(output_dir, output_filename)
 
     try:
-        # Run translation in thread pool (blocking API calls)
         def run_translate():
             return translate_video(
                 video_path=input_path,
@@ -1638,16 +1533,24 @@ async def translate_clip(
     if req.job_id in jobs and req.clip_index < len(jobs[req.job_id].get('result', {}).get('clips', [])):
          jobs[req.job_id]['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
 
-    # Update Metadata on Disk
+    # Update DB clip video_url
+    if creation_id:
+        admin_db.update_clip_by_index(creation_id, req.clip_index, video_url=f"/videos/{req.job_id}/{output_filename}")
+
+    # Also persist to metadata file for backward compat
     try:
-        if req.clip_index < len(clips):
-            clips[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
-            data['shorts'] = clips
-            with open(json_files[0], 'w') as f:
-                json.dump(data, f, indent=4)
-                print(f"✅ Metadata updated with translated video for clip {req.clip_index}")
-    except Exception as e:
-        print(f"⚠️ Failed to update metadata.json: {e}")
+        json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+        if json_files:
+            with open(json_files[0], 'r') as f:
+                data = json.load(f)
+            shorts = data.get('shorts', [])
+            if req.clip_index < len(shorts):
+                shorts[req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+                data['shorts'] = shorts
+                with open(json_files[0], 'w') as f:
+                    json.dump(data, f, indent=4)
+    except Exception:
+        pass
 
     return {
         "success": True,

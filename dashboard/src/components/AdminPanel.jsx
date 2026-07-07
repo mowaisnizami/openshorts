@@ -635,6 +635,18 @@ export default function AdminPanel() {
                 )}
               </div>
             </td>
+            <td className="py-3 px-4">
+              <div className="flex flex-wrap gap-1">
+                {(item.youtube_channels || []).flatMap(ch => ch.campaigns || []).filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i).map(c => (
+                  <span key={c.id} className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300" title={c.whop_channel_name ? `${c.whop_channel_name} / ${c.name}` : c.name}>
+                    {c.whop_channel_name ? `${c.whop_channel_name} / ${c.name}` : c.name}
+                  </span>
+                ))}
+                {(!item.youtube_channels || item.youtube_channels.flatMap(ch => ch.campaigns || []).length === 0) && (
+                  <span className="text-xs text-zinc-600">—</span>
+                )}
+              </div>
+            </td>
           </>
         )}
         {tab === 'YT Channels' && (
@@ -979,6 +991,7 @@ export default function AdminPanel() {
                     <>
                       <th className="text-left py-3 px-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Niches</th>
                       <th className="text-left py-3 px-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">YT Channels</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Campaigns</th>
                     </>
                   )}
                   {tab === 'YT Channels' && (

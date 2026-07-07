@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   Bot,
   Calendar,
   Check,
@@ -31,7 +32,7 @@ import {
   X,
   Youtube
 } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import CreationsGallery from './components/CreationsGallery';
 import MediaInput from './components/MediaInput';
 import ProcessingAnimation from './components/ProcessingAnimation';
@@ -187,15 +188,100 @@ const UserProfileSelector = ({ profiles, selectedUserId, onSelect }) => {
   );
 };
 
-const SESSION_KEY = 'openshorts_session';
-const SESSION_MAX_AGE = 3600000; // 1 hour (matches server job retention)
-
 // Mock polling function
 const pollJob = async (jobId) => {
   const res = await fetch(getApiUrl(`/api/status/${jobId}`));
   if (!res.ok) throw new Error('Status check failed');
   return res.json();
 };
+
+const STATUS_BADGES = {
+  queued: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  processing: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  failed: 'bg-red-500/10 text-red-400 border-red-500/20'
+};
+
+function ActiveJobsSidebar({ children, recentJobIds, onSelectJob }) {
+  const [creations, setCreations] = useState([]);
+
+  useEffect(() => {
+    fetch(getApiUrl(`/api/creations?limit=50`))
+      .then((r) => (r.ok ? r.json() : { creations: [] }))
+      .then((data) => setCreations(data.creations || []))
+      .catch(() => {});
+
+    const interval = setInterval(() => {
+      fetch(getApiUrl(`/api/creations?limit=50`))
+        .then((r) => (r.ok ? r.json() : { creations: [] }))
+        .then((data) => setCreations(data.creations || []))
+        .catch(() => {});
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [recentJobIds.join(',')]);
+
+  const relevant = creations.filter(
+    (c) =>
+      recentJobIds.includes(c.job_id) ||
+      c.status === 'processing' ||
+      c.status === 'queued'
+  );
+
+  return (
+    <div className="h-full flex animate-[fadeIn_0.3s_ease-out]">
+      {children}
+      <div className="w-80 lg:w-96 border-l border-white/5 bg-black/20 overflow-y-auto custom-scrollbar">
+        <div className="p-4 border-b border-white/5">
+          <h3 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+            <Activity size={14} className="text-primary" />
+            Active Projects
+          </h3>
+        </div>
+        {relevant.length === 0 ? (
+          <div className="p-4 text-xs text-zinc-600 text-center mt-8">
+            No active jobs yet. Submit a video to get started.
+          </div>
+        ) : (
+          <div className="divide-y divide-white/5">
+            {relevant.map((c) => (
+              <button
+                key={c.job_id}
+                onClick={() => onSelectJob(c.job_id)}
+                className="w-full text-left px-4 py-3 hover:bg-white/5 transition-colors space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-zinc-200 truncate font-medium">
+                    {c.source?.split('/').pop()?.slice(0, 30) ||
+                      c.job_id?.slice(0, 8)}
+                  </span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 ${STATUS_BADGES[c.status] || STATUS_BADGES.queued}`}
+                  >
+                    {c.status}
+                  </span>
+                </div>
+                {c.clips?.length > 0 && (
+                  <span className="text-[10px] text-zinc-500">
+                    {c.clips.length} clip{c.clips.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {c.progress_pct !== undefined && c.status === 'processing' && (
+                  <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all"
+                      style={{ width: `${c.progress_pct}%` }}
+                    />
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -238,9 +324,10 @@ function App() {
   const [logsVisible, setLogsVisible] = useState(true);
   const [processingMedia, setProcessingMedia] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, settings
+  const [recentJobIds, setRecentJobIds] = useState([]);
 
-  const [sessionRecovered, setSessionRecovered] = useState(false);
   const [showScheduleWeek, setShowScheduleWeek] = useState(false);
+  const jobHistoryRef = useRef({});
 
   // Sync state for original video playback
   const [syncedTime, setSyncedTime] = useState(0);
@@ -256,56 +343,6 @@ function App() {
   const handleClipPause = () => {
     setIsSyncedPlaying(false);
   };
-
-  // Session Recovery: Restore on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(SESSION_KEY);
-      if (!saved) return;
-      const session = JSON.parse(saved);
-      if (Date.now() - session.timestamp > SESSION_MAX_AGE) {
-        localStorage.removeItem(SESSION_KEY);
-        return;
-      }
-      if (session.jobId && session.status && session.status !== 'idle') {
-        setJobId(session.jobId);
-        setResults(session.results || null);
-        if (session.processingMedia)
-          setProcessingMedia(session.processingMedia);
-        if (session.activeTab) setActiveTab(session.activeTab);
-        // If was processing, resume polling; if complete/error, just show results
-        setStatus(
-          session.status === 'processing' ? 'processing' : session.status
-        );
-        setSessionRecovered(true);
-        setTimeout(() => setSessionRecovered(false), 5000);
-      }
-    } catch (e) {
-      localStorage.removeItem(SESSION_KEY);
-    }
-  }, []);
-
-  // Session Recovery: Save state changes
-  useEffect(() => {
-    if (status === 'idle') {
-      localStorage.removeItem(SESSION_KEY);
-      return;
-    }
-    try {
-      const sessionData = {
-        jobId,
-        status,
-        results,
-        processingMedia:
-          processingMedia?.type === 'url' ? processingMedia : null,
-        activeTab,
-        timestamp: Date.now()
-      };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
-    } catch (e) {
-      // localStorage full or serialization error - ignore
-    }
-  }, [jobId, status, results, activeTab]);
 
   useEffect(() => {
     if (uploadPostKey) {
@@ -340,15 +377,19 @@ function App() {
       interval = setInterval(async () => {
         try {
           const data = await pollJob(jobId);
-          console.log('Job status:', data);
 
-          // Update results if available (real-time)
           if (data.result) {
             setResults(data.result);
+            if (jobHistoryRef.current[jobId]) {
+              jobHistoryRef.current[jobId].results = data.result;
+            }
           }
 
           if (data.status === 'completed') {
             setStatus('complete');
+            if (jobHistoryRef.current[jobId]) {
+              jobHistoryRef.current[jobId].status = 'complete';
+            }
             clearInterval(interval);
           } else if (data.status === 'failed') {
             setStatus('error');
@@ -357,11 +398,24 @@ function App() {
               (data.logs && data.logs.length > 0
                 ? data.logs[data.logs.length - 1]
                 : 'Process failed');
-            setLogs((prev) => [...prev, 'Error: ' + errorMsg]);
+            setLogs((prev) => {
+              const newLogs = [...prev, 'Error: ' + errorMsg];
+              if (jobHistoryRef.current[jobId]) {
+                jobHistoryRef.current[jobId].logs = newLogs;
+              }
+              return newLogs;
+            });
+            if (jobHistoryRef.current[jobId]) {
+              jobHistoryRef.current[jobId].status = 'error';
+            }
             clearInterval(interval);
           } else {
-            // Update logs if available
-            if (data.logs) setLogs(data.logs);
+            if (data.logs) {
+              setLogs(data.logs);
+              if (jobHistoryRef.current[jobId]) {
+                jobHistoryRef.current[jobId].logs = data.logs;
+              }
+            }
           }
         } catch (e) {
           console.error('Polling error', e);
@@ -417,7 +471,7 @@ function App() {
           niche_id: data.niche_id || null,
           yt_channel_id: data.yt_channel_id || null,
           whop_channel_id: data.whop_channel_id || null,
-          whop_campaign_id: data.whop_campaign_id || null,
+          whop_campaign_id: data.whop_campaign_id || null
         });
       } else {
         const formData = new FormData();
@@ -425,9 +479,12 @@ function App() {
         formData.append('acknowledged', data.acknowledged ? 'true' : 'false');
         if (data.user_id) formData.append('user_id', data.user_id);
         if (data.niche_id) formData.append('niche_id', data.niche_id);
-        if (data.yt_channel_id) formData.append('yt_channel_id', data.yt_channel_id);
-        if (data.whop_channel_id) formData.append('whop_channel_id', data.whop_channel_id);
-        if (data.whop_campaign_id) formData.append('whop_campaign_id', data.whop_campaign_id);
+        if (data.yt_channel_id)
+          formData.append('yt_channel_id', data.yt_channel_id);
+        if (data.whop_channel_id)
+          formData.append('whop_channel_id', data.whop_channel_id);
+        if (data.whop_campaign_id)
+          formData.append('whop_campaign_id', data.whop_campaign_id);
         body = formData;
       }
 
@@ -440,19 +497,49 @@ function App() {
       if (!res.ok) throw new Error(await res.text());
       const resData = await res.json();
       setJobId(resData.job_id);
+      setRecentJobIds((prev) =>
+        prev.includes(resData.job_id) ? prev : [...prev, resData.job_id]
+      );
     } catch (e) {
       setStatus('error');
       setLogs((l) => [...l, `Error starting job: ${e.message}`]);
     }
   };
 
-  const handleReset = () => {
+  const handleGoToForm = () => {
+    if (jobId) {
+      jobHistoryRef.current[jobId] = { results, logs, processingMedia, status };
+      setRecentJobIds((prev) =>
+        prev.includes(jobId) ? prev : [...prev, jobId]
+      );
+    }
     setStatus('idle');
     setJobId(null);
     setResults(null);
     setLogs([]);
     setProcessingMedia(null);
-    localStorage.removeItem(SESSION_KEY);
+  };
+
+  const handleSelectJob = async (selectedJobId) => {
+    if (jobId) {
+      jobHistoryRef.current[jobId] = { results, logs, processingMedia, status };
+    }
+    setJobId(selectedJobId);
+    setLogs([]);
+    setStatus('processing');
+    setResults(null);
+    setProcessingMedia(
+      jobHistoryRef.current[selectedJobId]?.processingMedia || null
+    );
+    try {
+      const data = await pollJob(selectedJobId);
+      if (data.logs) setLogs(data.logs);
+      if (data.result) setResults(data.result);
+      if (data.status === 'completed') setStatus('complete');
+      else if (data.status === 'failed') setStatus('error');
+    } catch (e) {
+      setLogs([`Loading job ${selectedJobId}...`]);
+    }
   };
 
   // --- UI Components ---
@@ -609,11 +696,11 @@ function App() {
           <div className="flex items-center gap-4">
             {status !== 'idle' && (
               <button
-                onClick={handleReset}
+                onClick={handleGoToForm}
                 className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors"
               >
-                <PlusCircle size={16} />
-                <span className="hidden sm:inline">New Project</span>
+                <ArrowLeft size={16} />
+                <span className="hidden sm:inline">Back</span>
               </button>
             )}
           </div>
@@ -639,27 +726,6 @@ function App() {
             )}
           </div>
         </header>
-
-        {/* Persistent Missing Keys Banner — visible on every screen */}
-
-        {/* Session Recovery Banner */}
-        {sessionRecovered && (
-          <div className="mx-6 mt-2 p-3 bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-between animate-[fadeIn_0.3s_ease-out] shrink-0">
-            <div className="flex items-center gap-2 text-sm text-primary">
-              <RotateCcw size={16} />
-              <span className="font-medium">Session recovered</span>
-              <span className="text-zinc-400 text-xs">
-                Your previous work has been restored.
-              </span>
-            </div>
-            <button
-              onClick={() => setSessionRecovered(false)}
-              className="text-zinc-500 hover:text-white transition-colors"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
 
         {/* Main Workspace */}
         <div className="flex-1 overflow-hidden relative">
@@ -1125,37 +1191,42 @@ function App() {
 
           {/* View: Dashboard (Idle) */}
           {activeTab === 'dashboard' && status === 'idle' && (
-            <div className="h-full flex flex-col items-center justify-center p-6 animate-[fadeIn_0.3s_ease-out]">
-              <div className="max-w-xl w-full text-center space-y-8">
-                <div className="space-y-4">
-                  <h1 className="text-4xl md:text-5xl font-black bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent">
-                    Create Viral Shorts
-                  </h1>
-                  <p className="text-zinc-400 text-lg">
-                    Drop your long-form video below to instantly generate viral
-                    clips with AI.
-                  </p>
-                </div>
+            <ActiveJobsSidebar
+              recentJobIds={recentJobIds}
+              onSelectJob={handleSelectJob}
+            >
+              <div className="flex-1 flex flex-col items-center justify-center p-6 overflow-y-auto">
+                <div className="max-w-xl w-full text-center space-y-8">
+                  <div className="space-y-4">
+                    <h1 className="text-4xl md:text-5xl font-black bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent">
+                      Create Viral Shorts
+                    </h1>
+                    <p className="text-zinc-400 text-lg">
+                      Drop your long-form video below to instantly generate
+                      viral clips with AI.
+                    </p>
+                  </div>
 
-                <MediaInput
-                  onProcess={handleProcess}
-                  isProcessing={status === 'processing'}
-                  adminPassword={adminPassword}
-                />
+                  <MediaInput
+                    onProcess={handleProcess}
+                    isProcessing={false}
+                    adminPassword={adminPassword}
+                  />
 
-                <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm">
-                  <span className="flex items-center gap-2">
-                    <Youtube size={16} /> YouTube
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <Instagram size={16} /> Instagram
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <TikTokIcon size={16} /> TikTok
-                  </span>
+                  <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm">
+                    <span className="flex items-center gap-2">
+                      <Youtube size={16} /> YouTube
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Instagram size={16} /> Instagram
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <TikTokIcon size={16} /> TikTok
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            </ActiveJobsSidebar>
           )}
 
           {/* View: Processing / Results (Split View) */}
@@ -1302,43 +1373,10 @@ function App() {
                         <p>Generation failed.</p>
                       </div>
                     ) : null}
-                </div>
-              </div>
-
-              <div className="glass-panel p-6 mt-8">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold">Admin Access</h2>
-                  <span className="text-[10px] bg-white/5 border border-white/5 px-2 py-0.5 rounded text-zinc-500 uppercase tracking-wider">Optional</span>
-                </div>
-                <p className="text-xs text-zinc-500 mb-6 leading-relaxed">
-                  Required to link creations to users and campaigns in the clip generator, and to filter creations by user/campaign.
-                </p>
-                <div className="space-y-4">
-                  <label className="block text-sm text-zinc-400">Admin Password</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      value={adminPassword}
-                      onChange={(e) => setAdminPassword(e.target.value)}
-                      className="input-field"
-                      placeholder="Enter admin password..."
-                    />
-                    <button
-                      onClick={() => {
-                        if (adminPassword) {
-                          localStorage.setItem('adminPassword', encrypt(adminPassword));
-                          alert('Admin password saved!');
-                        }
-                      }}
-                      className="btn-primary py-2 px-4 text-sm"
-                    >
-                      Save
-                    </button>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
         </div>
       </main>
 
