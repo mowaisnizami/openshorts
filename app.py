@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3, list_actor_gallery, upload_video_to_gallery, list_video_gallery
+import admin_db
 
 load_dotenv()
 
@@ -31,6 +32,9 @@ MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "5"))
 MAX_FILE_SIZE_MB = 8192  # 8GB limit
 JOB_RETENTION_SECONDS = 604800  # 1 hour retention
 DISABLE_YOUTUBE_URL = os.environ.get("DISABLE_YOUTUBE_URL", "false").lower() in ("1", "true", "yes")
+
+# Admin DB configuration
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
 # Application State
 job_queue = asyncio.Queue()
@@ -266,6 +270,11 @@ async def run_job_wrapper(job_id):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Init admin DB (fail gracefully if PostgreSQL unreachable)
+    try:
+        admin_db.init_db()
+    except Exception as e:
+        print(f"⚠️ Admin DB init failed (admin panel unavailable): {e}")
     # Start worker and cleanup
     worker_task = asyncio.create_task(process_queue())
     cleanup_task = asyncio.create_task(cleanup_jobs())
@@ -2768,3 +2777,183 @@ async def saasshorts_voices(
         ],
         "source": "defaults",
     }
+
+
+# ─── Admin Endpoints ────────────────────────────────────────────────────────────
+
+class _NameBody(BaseModel):
+    name: str
+
+class _YTChannelBody(BaseModel):
+    name: str
+    username: str
+    url: str
+    niche_id: Optional[int] = None
+
+class _FBPageBody(BaseModel):
+    name: str
+    page_name: str
+    url: str
+    niche_id: Optional[int] = None
+
+def _check_admin(x_admin_password: Optional[str]):
+    if not x_admin_password or x_admin_password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Invalid admin password")
+
+
+# --- Users ---
+
+@app.get("/api/admin/users")
+async def admin_list_users(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.list_users()
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(body: _NameBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.create_user(body.name)
+
+
+@app.put("/api/admin/users/{user_id}")
+async def admin_update_user(user_id: int, body: _NameBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.update_user(user_id, body.name)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(user_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.delete_user(user_id)
+    return {"ok": True}
+
+
+# --- Niches ---
+
+@app.get("/api/admin/niches")
+async def admin_list_niches(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.list_niches()
+
+
+@app.post("/api/admin/niches")
+async def admin_create_niche(body: _NameBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.create_niche(body.name)
+
+
+@app.put("/api/admin/niches/{niche_id}")
+async def admin_update_niche(niche_id: int, body: _NameBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.update_niche(niche_id, body.name)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/niches/{niche_id}")
+async def admin_delete_niche(niche_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.delete_niche(niche_id)
+    return {"ok": True}
+
+
+# --- YouTube Channels ---
+
+@app.get("/api/admin/youtube-channels")
+async def admin_list_youtube_channels(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.list_youtube_channels()
+
+
+@app.post("/api/admin/youtube-channels")
+async def admin_create_youtube_channel(
+    body: _YTChannelBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    return admin_db.create_youtube_channel(body.name, body.username, body.url, body.niche_id)
+
+
+@app.put("/api/admin/youtube-channels/{channel_id}")
+async def admin_update_youtube_channel(
+    channel_id: int, body: _YTChannelBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    admin_db.update_youtube_channel(channel_id, body.name, body.username, body.url, body.niche_id)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/youtube-channels/{channel_id}")
+async def admin_delete_youtube_channel(channel_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.delete_youtube_channel(channel_id)
+    return {"ok": True}
+
+
+# --- FB Pages ---
+
+@app.get("/api/admin/fb-pages")
+async def admin_list_fb_pages(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.list_fb_pages()
+
+
+@app.post("/api/admin/fb-pages")
+async def admin_create_fb_page(
+    body: _FBPageBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    return admin_db.create_fb_page(body.name, body.page_name, body.url, body.niche_id)
+
+
+@app.put("/api/admin/fb-pages/{page_id}")
+async def admin_update_fb_page(
+    page_id: int, body: _FBPageBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    admin_db.update_fb_page(page_id, body.name, body.page_name, body.url, body.niche_id)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/fb-pages/{page_id}")
+async def admin_delete_fb_page(page_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.delete_fb_page(page_id)
+    return {"ok": True}
+
+
+class _IdListBody(BaseModel):
+    niche_ids: Optional[List[int]] = None
+    channel_ids: Optional[List[int]] = None
+
+
+@app.get("/api/admin/users/{user_id}/niches")
+async def admin_get_user_niches(user_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return {"niche_ids": admin_db.get_user_niches(user_id)}
+
+
+@app.put("/api/admin/users/{user_id}/niches")
+async def admin_set_user_niches(user_id: int, body: _IdListBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.set_user_niches(user_id, body.niche_ids or [])
+    return {"ok": True}
+
+
+@app.get("/api/admin/users/{user_id}/youtube-channels")
+async def admin_get_user_youtube_channels(user_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return {"channel_ids": admin_db.get_user_youtube_channels(user_id)}
+
+
+@app.put("/api/admin/users/{user_id}/youtube-channels")
+async def admin_set_user_youtube_channels(user_id: int, body: _IdListBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.set_user_youtube_channels(user_id, body.channel_ids or [])
+    return {"ok": True}
+
+
+

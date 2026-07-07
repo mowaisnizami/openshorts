@@ -37,6 +37,7 @@ import MediaInput from './components/MediaInput';
 import ProcessingAnimation from './components/ProcessingAnimation';
 import ResultCard from './components/ResultCard';
 // import Gallery from './components/Gallery';
+import AdminPanel from './components/AdminPanel';
 import SaaShortsTab from './components/SaaShortsTab';
 import ScheduleWeekModal from './components/ScheduleWeekModal';
 import ThumbnailStudio from './components/ThumbnailStudio';
@@ -510,6 +511,14 @@ function App() {
           <Settings size={20} />
           <span className="font-medium hidden lg:block">Settings</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('admin')}
+          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-colors ${activeTab === 'admin' ? 'bg-primary/10 text-primary' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+        >
+          <Shield size={20} />
+          <span className="font-medium hidden lg:block">Admin</span>
+        </button>
       </nav>
 
       <div className="p-4 border-t border-white/5 space-y-2">
@@ -615,29 +624,6 @@ function App() {
         </header>
 
         {/* Persistent Missing Keys Banner — visible on every screen */}
-        {!uploadPostKey && activeTab !== 'settings' && (
-          <div className="mx-6 mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-4 shrink-0 animate-[fadeIn_0.3s_ease-out]">
-            <div className="flex items-center gap-3 text-sm text-amber-200">
-              <KeyRound size={16} className="shrink-0 text-amber-400" />
-              <div>
-                <span className="font-semibold">
-                  Required API keys missing.
-                </span>{' '}
-                <span className="text-amber-200/80">
-                  {!uploadPostKey
-                    ? 'Set your Upload-Post API key to use OpenShorts.'
-                    : ''}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black transition-colors"
-            >
-              Go to Settings
-            </button>
-          </div>
-        )}
 
         {/* Session Recovery Banner */}
         {sessionRecovered && (
@@ -918,6 +904,9 @@ function App() {
               </div>
             </div>
           )}
+
+          {/* View: Admin */}
+          {activeTab === 'admin' && <AdminPanel />}
 
           {/* View: SaaS Shorts */}
           {activeTab === 'saasshorts' && (

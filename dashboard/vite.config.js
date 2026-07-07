@@ -8,23 +8,23 @@ export default defineConfig({
     allowedHosts: ['openshorts.app', 'www.openshorts.app'],
     proxy: {
       '/api': {
-        target: 'http://192.168.100.105:8000',
+        target: 'http://192.168.18.105:8000',
         changeOrigin: true
       },
       '/videos': {
-        target: 'http://192.168.100.105:8000',
+        target: 'http://192.168.18.105:8000',
         changeOrigin: true
       },
       '/thumbnails': {
-        target: 'http://192.168.100.105:8000',
+        target: 'http://192.168.18.105:8000',
         changeOrigin: true
       },
       '/gallery': {
-        target: 'http://192.168.100.105:8000',
+        target: 'http://192.168.18.105:8000',
         changeOrigin: true
       },
       '/video': {
-        target: 'http://192.168.100.105:8000',
+        target: 'http://192.168.18.105:8000',
         changeOrigin: true
       },
       '/render': {

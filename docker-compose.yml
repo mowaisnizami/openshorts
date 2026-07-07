@@ -8,6 +8,13 @@ services:
       - .:/app
       - /app/__pycache__
       - ./output:/app/output
+    environment:
+      - DB_HOST=${DB_HOST:-192.168.100.103}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-openshorts}
+      - DB_USER=${DB_USER:-openshorts}
+      - DB_PASSWORD=${DB_PASSWORD:-openshorts}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
     restart: unless-stopped
 
   frontend:
