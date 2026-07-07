@@ -2796,6 +2796,13 @@ class _FBPageBody(BaseModel):
     url: str
     niche_id: Optional[int] = None
 
+class _WhopChannelBody(BaseModel):
+    name: str
+
+class _WhopCampaignBody(BaseModel):
+    name: str
+    whop_channel_id: Optional[int] = None
+
 def _check_admin(x_admin_password: Optional[str]):
     if not x_admin_password or x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Invalid admin password")
@@ -2925,9 +2932,117 @@ async def admin_delete_fb_page(page_id: int, x_admin_password: Optional[str] = H
     return {"ok": True}
 
 
+# --- Whop Channels ---
+
+@app.get("/api/admin/whop-channels")
+async def admin_list_whop_channels(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.list_whop_channels()
+
+
+@app.post("/api/admin/whop-channels")
+async def admin_create_whop_channel(
+    body: _WhopChannelBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    return admin_db.create_whop_channel(body.name)
+
+
+@app.put("/api/admin/whop-channels/{channel_id}")
+async def admin_update_whop_channel(
+    channel_id: int, body: _WhopChannelBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    admin_db.update_whop_channel(channel_id, body.name)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/whop-channels/{channel_id}")
+async def admin_delete_whop_channel(channel_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.delete_whop_channel(channel_id)
+    return {"ok": True}
+
+
+# --- Whop Campaigns ---
+
+@app.get("/api/admin/whop-campaigns")
+async def admin_list_whop_campaigns(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.list_whop_campaigns()
+
+
+@app.post("/api/admin/whop-campaigns")
+async def admin_create_whop_campaign(
+    body: _WhopCampaignBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    return admin_db.create_whop_campaign(body.name, body.whop_channel_id)
+
+
+@app.put("/api/admin/whop-campaigns/{campaign_id}")
+async def admin_update_whop_campaign(
+    campaign_id: int, body: _WhopCampaignBody,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    _check_admin(x_admin_password)
+    admin_db.update_whop_campaign(campaign_id, body.name, body.whop_channel_id)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/whop-campaigns/{campaign_id}")
+async def admin_delete_whop_campaign(campaign_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.delete_whop_campaign(campaign_id)
+    return {"ok": True}
+
+
 class _IdListBody(BaseModel):
     niche_ids: Optional[List[int]] = None
     channel_ids: Optional[List[int]] = None
+    campaign_ids: Optional[List[int]] = None
+
+
+@app.get("/api/admin/whop-campaigns/{campaign_id}/niches")
+async def admin_get_whop_campaign_niches(campaign_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return {"niche_ids": admin_db.get_whop_campaign_niches(campaign_id)}
+
+
+@app.put("/api/admin/whop-campaigns/{campaign_id}/niches")
+async def admin_set_whop_campaign_niches(campaign_id: int, body: _IdListBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.set_whop_campaign_niches(campaign_id, body.niche_ids or [])
+    return {"ok": True}
+
+
+@app.get("/api/admin/whop-campaigns/{campaign_id}/youtube-channels")
+async def admin_get_whop_campaign_youtube_channels(campaign_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return {"channel_ids": admin_db.get_whop_campaign_youtube_channels(campaign_id)}
+
+
+@app.put("/api/admin/whop-campaigns/{campaign_id}/youtube-channels")
+async def admin_set_whop_campaign_youtube_channels(campaign_id: int, body: _IdListBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.set_whop_campaign_youtube_channels(campaign_id, body.channel_ids or [])
+    return {"ok": True}
+
+
+@app.get("/api/admin/youtube-channels/{channel_id}/whop-campaigns")
+async def admin_get_youtube_channel_whop_campaigns(channel_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return {"campaign_ids": admin_db.get_youtube_channel_whop_campaigns(channel_id)}
+
+
+@app.put("/api/admin/youtube-channels/{channel_id}/whop-campaigns")
+async def admin_set_youtube_channel_whop_campaigns(channel_id: int, body: _IdListBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    admin_db.set_youtube_channel_whop_campaigns(channel_id, body.campaign_ids or [])
+    return {"ok": True}
 
 
 @app.get("/api/admin/users/{user_id}/niches")

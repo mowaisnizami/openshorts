@@ -56,10 +56,167 @@ def init_db():
                     PRIMARY KEY (user_id, youtube_channel_id)
                 );
                 ALTER TABLE fb_pages ADD COLUMN IF NOT EXISTS niche_id INTEGER REFERENCES niches(id) ON DELETE SET NULL;
+                CREATE TABLE IF NOT EXISTS whop_channels (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS whop_campaigns (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    whop_channel_id INTEGER REFERENCES whop_channels(id) ON DELETE SET NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS whop_campaign_niches (
+                    campaign_id INTEGER REFERENCES whop_campaigns(id) ON DELETE CASCADE,
+                    niche_id INTEGER REFERENCES niches(id) ON DELETE CASCADE,
+                    PRIMARY KEY (campaign_id, niche_id)
+                );
+                CREATE TABLE IF NOT EXISTS whop_campaign_youtube_channels (
+                    campaign_id INTEGER REFERENCES whop_campaigns(id) ON DELETE CASCADE,
+                    youtube_channel_id INTEGER REFERENCES youtube_channels(id) ON DELETE CASCADE,
+                    PRIMARY KEY (campaign_id, youtube_channel_id)
+                );
             """)
-        conn.commit()
+            conn.commit()
     finally:
         conn.close()
+
+
+# --- Whop Channels ---
+
+def list_whop_channels() -> List[Dict]:
+    return _fetchall("SELECT id, name, created_at FROM whop_channels ORDER BY id")
+
+
+def create_whop_channel(name: str) -> Dict:
+    new_id = _execute_returning(
+        "INSERT INTO whop_channels (name) VALUES (%s) RETURNING id", (name,)
+    )
+    return {"id": new_id, "name": name}
+
+
+def update_whop_channel(channel_id: int, name: str) -> bool:
+    _execute("UPDATE whop_channels SET name = %s WHERE id = %s", (name, channel_id))
+    return True
+
+
+def delete_whop_channel(channel_id: int) -> bool:
+    _execute("DELETE FROM whop_channels WHERE id = %s", (channel_id,))
+    return True
+
+
+# --- Whop Campaigns ---
+
+def list_whop_campaigns() -> List[Dict]:
+    campaigns = _fetchall("""
+        SELECT wc.id, wc.name, wc.whop_channel_id, wc.created_at,
+               wch.name AS whop_channel_name
+        FROM whop_campaigns wc
+        LEFT JOIN whop_channels wch ON wch.id = wc.whop_channel_id
+        ORDER BY wc.id
+    """)
+    niche_rows = _fetchall("""
+        SELECT wcn.campaign_id, n.id AS niche_id, n.name AS niche_name
+        FROM whop_campaign_niches wcn
+        JOIN niches n ON n.id = wcn.niche_id
+        ORDER BY n.name
+    """)
+    yt_rows = _fetchall("""
+        SELECT wcy.campaign_id, yc.id AS channel_id, yc.name AS channel_name
+        FROM whop_campaign_youtube_channels wcy
+        JOIN youtube_channels yc ON yc.id = wcy.youtube_channel_id
+        ORDER BY yc.name
+    """)
+    niche_map: Dict[int, List[Dict]] = {}
+    for r in niche_rows:
+        niche_map.setdefault(r["campaign_id"], []).append({"id": r["niche_id"], "name": r["niche_name"]})
+    yt_map: Dict[int, List[Dict]] = {}
+    for r in yt_rows:
+        yt_map.setdefault(r["campaign_id"], []).append({"id": r["channel_id"], "name": r["channel_name"]})
+    for c in campaigns:
+        c["niches"] = niche_map.get(c["id"], [])
+        c["youtube_channels"] = yt_map.get(c["id"], [])
+    return campaigns
+
+
+def create_whop_campaign(name: str, whop_channel_id: Optional[int] = None) -> Dict:
+    new_id = _execute_returning(
+        "INSERT INTO whop_campaigns (name, whop_channel_id) VALUES (%s, %s) RETURNING id",
+        (name, whop_channel_id),
+    )
+    return {"id": new_id, "name": name, "whop_channel_id": whop_channel_id}
+
+
+def update_whop_campaign(campaign_id: int, name: str, whop_channel_id: Optional[int] = None) -> bool:
+    _execute(
+        "UPDATE whop_campaigns SET name = %s, whop_channel_id = %s WHERE id = %s",
+        (name, whop_channel_id, campaign_id),
+    )
+    return True
+
+
+def delete_whop_campaign(campaign_id: int) -> bool:
+    _execute("DELETE FROM whop_campaigns WHERE id = %s", (campaign_id,))
+    return True
+
+
+# --- Linkage: Whop Campaign ↔ Niches ---
+
+def get_whop_campaign_niches(campaign_id: int) -> List[int]:
+    rows = _fetchall("SELECT niche_id FROM whop_campaign_niches WHERE campaign_id = %s", (campaign_id,))
+    return [r["niche_id"] for r in rows]
+
+
+def set_whop_campaign_niches(campaign_id: int, niche_ids: List[int]):
+    _execute("DELETE FROM whop_campaign_niches WHERE campaign_id = %s", (campaign_id,))
+    if niche_ids:
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                for nid in niche_ids:
+                    cur.execute("INSERT INTO whop_campaign_niches (campaign_id, niche_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (campaign_id, nid))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+# --- Linkage: Whop Campaign ↔ YouTube Channels ---
+
+def get_whop_campaign_youtube_channels(campaign_id: int) -> List[int]:
+    rows = _fetchall("SELECT youtube_channel_id FROM whop_campaign_youtube_channels WHERE campaign_id = %s", (campaign_id,))
+    return [r["youtube_channel_id"] for r in rows]
+
+
+def set_whop_campaign_youtube_channels(campaign_id: int, channel_ids: List[int]):
+    _execute("DELETE FROM whop_campaign_youtube_channels WHERE campaign_id = %s", (campaign_id,))
+    if channel_ids:
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                for cid in channel_ids:
+                    cur.execute("INSERT INTO whop_campaign_youtube_channels (campaign_id, youtube_channel_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (campaign_id, cid))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_youtube_channel_whop_campaigns(channel_id: int) -> List[int]:
+    rows = _fetchall("SELECT campaign_id FROM whop_campaign_youtube_channels WHERE youtube_channel_id = %s", (channel_id,))
+    return [r["campaign_id"] for r in rows]
+
+
+def set_youtube_channel_whop_campaigns(channel_id: int, campaign_ids: List[int]):
+    _execute("DELETE FROM whop_campaign_youtube_channels WHERE youtube_channel_id = %s", (channel_id,))
+    if campaign_ids:
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                for cid in campaign_ids:
+                    cur.execute("INSERT INTO whop_campaign_youtube_channels (campaign_id, youtube_channel_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (cid, channel_id))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 # --- Linkage: User ↔ YouTube Channels ---
@@ -154,7 +311,47 @@ def _execute_returning(query: str, params: tuple = ()) -> int:
 # --- Users ---
 
 def list_users() -> List[Dict]:
-    return _fetchall("SELECT id, name, created_at FROM users ORDER BY id")
+    users = _fetchall("SELECT id, name, created_at FROM users ORDER BY id")
+    rows = _fetchall("""
+        SELECT
+            uyc.user_id,
+            yc.id AS channel_id, yc.name AS channel_name, yc.niche_id,
+            n.name AS niche_name,
+            wcy.campaign_id, wc.name AS campaign_name,
+            wch.id AS whop_channel_id, wch.name AS whop_channel_name
+        FROM user_youtube_channels uyc
+        JOIN youtube_channels yc ON yc.id = uyc.youtube_channel_id
+        LEFT JOIN niches n ON n.id = yc.niche_id
+        LEFT JOIN whop_campaign_youtube_channels wcy ON wcy.youtube_channel_id = yc.id
+        LEFT JOIN whop_campaigns wc ON wc.id = wcy.campaign_id
+        LEFT JOIN whop_channels wch ON wch.id = wc.whop_channel_id
+        ORDER BY yc.name, wc.name
+    """)
+    channel_map: Dict[int, Dict[int, Dict]] = {}
+    for r in rows:
+        uid = r["user_id"]
+        cid = r["channel_id"]
+        if uid not in channel_map:
+            channel_map[uid] = {}
+        if cid not in channel_map[uid]:
+            channel_map[uid][cid] = {
+                "id": cid,
+                "name": r["channel_name"],
+                "niche_id": r["niche_id"],
+                "niche_name": r["niche_name"],
+                "campaigns": [],
+            }
+        camp = channel_map[uid][cid]["campaigns"]
+        if r["campaign_id"] is not None:
+            camp.append({
+                "id": r["campaign_id"],
+                "name": r["campaign_name"],
+                "whop_channel_id": r["whop_channel_id"],
+                "whop_channel_name": r["whop_channel_name"],
+            })
+    for u in users:
+        u["youtube_channels"] = list(channel_map.get(u["id"], {}).values())
+    return users
 
 
 def create_user(name: str) -> Dict:
@@ -200,13 +397,25 @@ def delete_niche(niche_id: int) -> bool:
 # --- YouTube Channels ---
 
 def list_youtube_channels() -> List[Dict]:
-    return _fetchall("""
+    channels = _fetchall("""
         SELECT yc.id, yc.name, yc.username, yc.url, yc.niche_id, yc.created_at,
                n.name AS niche_name
         FROM youtube_channels yc
         LEFT JOIN niches n ON n.id = yc.niche_id
         ORDER BY yc.id
     """)
+    campaign_rows = _fetchall("""
+        SELECT wcy.youtube_channel_id, wc.id AS campaign_id, wc.name AS campaign_name
+        FROM whop_campaign_youtube_channels wcy
+        JOIN whop_campaigns wc ON wc.id = wcy.campaign_id
+        ORDER BY wc.name
+    """)
+    campaign_map: Dict[int, List[Dict]] = {}
+    for r in campaign_rows:
+        campaign_map.setdefault(r["youtube_channel_id"], []).append({"id": r["campaign_id"], "name": r["campaign_name"]})
+    for ch in channels:
+        ch["campaigns"] = campaign_map.get(ch["id"], [])
+    return channels
 
 
 def create_youtube_channel(name: str, username: str, url: str, niche_id: Optional[int] = None) -> Dict:
