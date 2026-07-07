@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Youtube, Upload, FileVideo, X } from 'lucide-react';
+import { Youtube, Upload, FileVideo, X, ChevronDown } from 'lucide-react';
 import { getApiUrl } from '../config';
 
 export default function MediaInput({ onProcess, isProcessing }) {
     const [youtubeUrlEnabled, setYoutubeUrlEnabled] = useState(true);
-    const [mode, setMode] = useState('url'); // 'url' | 'file'
+    const [mode, setMode] = useState('url');
     const [url, setUrl] = useState('');
     const [file, setFile] = useState(null);
     const [acknowledged, setAcknowledged] = useState(false);
+    const [campaigns, setCampaigns] = useState([]);
+    const [selectedCampaignId, setSelectedCampaignId] = useState('');
 
     useEffect(() => {
         fetch(getApiUrl('/api/config'))
@@ -21,13 +23,22 @@ export default function MediaInput({ onProcess, isProcessing }) {
             .catch(() => {});
     }, []);
 
+    useEffect(() => {
+        fetch(getApiUrl('/api/campaigns'))
+            .then((r) => r.ok ? r.json() : [])
+            .then(setCampaigns)
+            .catch(() => {});
+    }, []);
+
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!acknowledged) return;
+        if (!selectedCampaignId) return;
+        const refs = { whop_campaign_id: parseInt(selectedCampaignId) };
         if (mode === 'url' && url) {
-            onProcess({ type: 'url', payload: url, acknowledged: true });
+            onProcess({ type: 'url', payload: url, acknowledged: true, ...refs });
         } else if (mode === 'file' && file) {
-            onProcess({ type: 'file', payload: file, acknowledged: true });
+            onProcess({ type: 'file', payload: file, acknowledged: true, ...refs });
         }
     };
 
@@ -125,9 +136,28 @@ export default function MediaInput({ onProcess, isProcessing }) {
                     </span>
                 </label>
 
+                {campaigns.length > 0 && (
+                    <div className="relative mt-4">
+                        <label className="block text-xs text-zinc-500 mb-1.5">Campaign <span className="text-red-400">*</span></label>
+                        <div className="relative">
+                            <select
+                                value={selectedCampaignId}
+                                onChange={(e) => setSelectedCampaignId(e.target.value)}
+                                className="w-full bg-zinc-800/80 border border-zinc-700/50 rounded-xl px-3 py-2.5 text-sm text-white appearance-none focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
+                            >
+                                <option value="">Select campaign...</option>
+                                {campaigns.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                        </div>
+                    </div>
+                )}
+
                 <button
                     type="submit"
-                    disabled={isProcessing || !acknowledged || (mode === 'url' && !url) || (mode === 'file' && !file)}
+                    disabled={isProcessing || !acknowledged || (mode === 'url' && !url) || (mode === 'file' && !file) || (campaigns.length > 0 && !selectedCampaignId)}
                     className="w-full btn-primary mt-4 flex items-center justify-center gap-2"
                 >
                     {isProcessing ? (

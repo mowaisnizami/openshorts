@@ -219,6 +219,13 @@ function App() {
     return '';
   });
 
+  // Admin password - loaded from localStorage (set in Settings)
+  const [adminPassword, setAdminPassword] = useState(() => {
+    const stored = localStorage.getItem('adminPassword');
+    if (stored) return decrypt(stored);
+    return '';
+  });
+
   const [uploadUserId, setUploadUserId] = useState(
     () => localStorage.getItem('uploadUserId') || ''
   );
@@ -405,12 +412,22 @@ function App() {
         headers['Content-Type'] = 'application/json';
         body = JSON.stringify({
           url: data.payload,
-          acknowledged: !!data.acknowledged
+          acknowledged: !!data.acknowledged,
+          user_id: data.user_id || null,
+          niche_id: data.niche_id || null,
+          yt_channel_id: data.yt_channel_id || null,
+          whop_channel_id: data.whop_channel_id || null,
+          whop_campaign_id: data.whop_campaign_id || null,
         });
       } else {
         const formData = new FormData();
         formData.append('file', data.payload);
         formData.append('acknowledged', data.acknowledged ? 'true' : 'false');
+        if (data.user_id) formData.append('user_id', data.user_id);
+        if (data.niche_id) formData.append('niche_id', data.niche_id);
+        if (data.yt_channel_id) formData.append('yt_channel_id', data.yt_channel_id);
+        if (data.whop_channel_id) formData.append('whop_channel_id', data.whop_channel_id);
+        if (data.whop_campaign_id) formData.append('whop_campaign_id', data.whop_campaign_id);
         body = formData;
       }
 
@@ -1088,6 +1105,7 @@ function App() {
               elevenLabsKey={elevenLabsKey}
               uploadPostKey={uploadPostKey}
               uploadUserId={uploadUserId}
+              adminPassword={adminPassword}
             />
           )}
 
@@ -1122,6 +1140,7 @@ function App() {
                 <MediaInput
                   onProcess={handleProcess}
                   isProcessing={status === 'processing'}
+                  adminPassword={adminPassword}
                 />
 
                 <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm">
@@ -1283,10 +1302,43 @@ function App() {
                         <p>Generation failed.</p>
                       </div>
                     ) : null}
+                </div>
+              </div>
+
+              <div className="glass-panel p-6 mt-8">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Admin Access</h2>
+                  <span className="text-[10px] bg-white/5 border border-white/5 px-2 py-0.5 rounded text-zinc-500 uppercase tracking-wider">Optional</span>
+                </div>
+                <p className="text-xs text-zinc-500 mb-6 leading-relaxed">
+                  Required to link creations to users and campaigns in the clip generator, and to filter creations by user/campaign.
+                </p>
+                <div className="space-y-4">
+                  <label className="block text-sm text-zinc-400">Admin Password</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      className="input-field"
+                      placeholder="Enter admin password..."
+                    />
+                    <button
+                      onClick={() => {
+                        if (adminPassword) {
+                          localStorage.setItem('adminPassword', encrypt(adminPassword));
+                          alert('Admin password saved!');
+                        }
+                      }}
+                      className="btn-primary py-2 px-4 text-sm"
+                    >
+                      Save
+                    </button>
                   </div>
                 </div>
               </div>
-            )}
+            </div>
+          )}
         </div>
       </main>
 

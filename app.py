@@ -10,11 +10,12 @@ import asyncio
 from dotenv import load_dotenv
 from typing import Dict, Optional, List
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Header, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from psycopg2.errors import UniqueViolation
 from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3, list_actor_gallery, upload_video_to_gallery, list_video_gallery
 import admin_db
 
@@ -79,7 +80,7 @@ def _get_next_clip_version(creations: List[Dict], job_id: str, base_id: int) -> 
             return f"{base_id}-{max_version + 1}"
     return f"{base_id}-1"
 
-def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None, status: str = "completed"):
+def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis: Optional[Dict] = None, status: str = "completed", metadata: Optional[Dict] = None):
     source = ""
     try:
         main_idx = cmd.index("main.py")
@@ -98,6 +99,7 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
         "prompt_file": f"/videos/{job_id}/prompt_sent.txt",
         "response_file": f"/videos/{job_id}/gemini_response.json",
     }
+    meta = metadata or {}
     for existing in creations:
         if existing["job_id"] == job_id:
             existing["clips"] = clips
@@ -105,9 +107,11 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
             if cost_analysis:
                 existing["cost_analysis"] = cost_analysis
             existing.update(artifact_urls)
+            if meta:
+                existing.setdefault("metadata", {}).update(meta)
             break
     else:
-        creations.insert(0, {
+        entry = {
             "job_id": job_id,
             "source": source,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -118,7 +122,10 @@ def _save_creation(job_id: str, cmd: List[str], clips: List[Dict], cost_analysis
             "progress_pct": 0,
             "steps_history": [],
             **artifact_urls,
-        })
+        }
+        if meta:
+            entry["metadata"] = meta
+        creations.insert(0, entry)
     _write_creations(creations)
 
 
@@ -381,7 +388,7 @@ async def run_job(job_id, job_data):
                         
                         if len(ready_clips) > last_clip_count:
                             last_clip_count = len(ready_clips)
-                            _save_creation(job_id, job_data['cmd'], ready_clips, cost_analysis, status="processing")
+                            _save_creation(job_id, job_data['cmd'], ready_clips, cost_analysis, status="processing", metadata=job_data.get('metadata'))
                         
                         if ready_clips:
                              jobs[job_id]['result'] = {'clips': ready_clips, 'cost_analysis': cost_analysis}
@@ -448,7 +455,7 @@ async def run_job(job_id, job_data):
                      clip['video_url'] = f"/videos/{job_id}/{clip_filename}"
                 
                 jobs[job_id]['result'] = {'clips': clips, 'cost_analysis': cost_analysis}
-                _save_creation(job_id, job_data['cmd'], clips, cost_analysis, status="completed")
+                _save_creation(job_id, job_data['cmd'], clips, cost_analysis, status="completed", metadata=job_data.get('metadata'))
                 _set_creation_progress(job_id, "completed", 100)
                 # Store original video title from the metadata filename
                 if base_name and base_name != job_id:
@@ -485,7 +492,12 @@ async def process_endpoint(
     request: Request,
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
-    acknowledged: Optional[str] = Form(None)
+    acknowledged: Optional[str] = Form(None),
+    user_id: Optional[int] = Form(None),
+    niche_id: Optional[int] = Form(None),
+    yt_channel_id: Optional[int] = Form(None),
+    whop_channel_id: Optional[int] = Form(None),
+    whop_campaign_id: Optional[int] = Form(None),
 ):
     api_key = request.headers.get("X-Gemini-Key")
     if not api_key:
@@ -499,6 +511,11 @@ async def process_endpoint(
         body = await request.json()
         url = body.get("url")
         ack_flag = bool(body.get("acknowledged"))
+        user_id = body.get("user_id")
+        niche_id = body.get("niche_id")
+        yt_channel_id = body.get("yt_channel_id")
+        whop_channel_id = body.get("whop_channel_id")
+        whop_campaign_id = body.get("whop_campaign_id")
 
     if not url and not file:
         raise HTTPException(status_code=400, detail="Must provide URL or File")
@@ -508,6 +525,19 @@ async def process_endpoint(
 
     if url and DISABLE_YOUTUBE_URL:
         raise HTTPException(status_code=403, detail="YouTube URL ingest is disabled on this deployment. Please upload a file you own.")
+
+    # Build metadata from reference fields
+    meta = {}
+    if user_id is not None:
+        meta["user_id"] = user_id
+    if niche_id is not None:
+        meta["niche_id"] = niche_id
+    if yt_channel_id is not None:
+        meta["yt_channel_id"] = yt_channel_id
+    if whop_channel_id is not None:
+        meta["whop_channel_id"] = whop_channel_id
+    if whop_campaign_id is not None:
+        meta["whop_campaign_id"] = whop_campaign_id
 
     # Capture attestation context for legal record (IP + timestamp + UA)
     client_ip = request.client.host if request.client else "unknown"
@@ -565,7 +595,8 @@ async def process_endpoint(
         'cmd': cmd,
         'env': env,
         'output_dir': job_output_dir,
-        'attestation': attestation
+        'attestation': attestation,
+        'metadata': meta if meta else None,
     }
 
     await job_queue.put(job_id)
@@ -654,12 +685,36 @@ async def get_status(job_id: str):
     }
 
 @app.get("/api/creations")
-async def list_creations(limit: int = 20, offset: int = 0):
+async def list_creations(
+    limit: int = 20,
+    offset: int = 0,
+    user_id: Optional[int] = Query(None),
+    niche_id: Optional[int] = Query(None),
+    yt_channel_id: Optional[int] = Query(None),
+    whop_channel_id: Optional[int] = Query(None),
+    whop_campaign_id: Optional[int] = Query(None),
+):
     limit = min(max(1, limit), 100)
     creations = _load_creations()
+    if user_id is not None:
+        creations = [c for c in creations if c.get("metadata", {}).get("user_id") == user_id]
+    if niche_id is not None:
+        creations = [c for c in creations if c.get("metadata", {}).get("niche_id") == niche_id]
+    if yt_channel_id is not None:
+        creations = [c for c in creations if c.get("metadata", {}).get("yt_channel_id") == yt_channel_id]
+    if whop_channel_id is not None:
+        creations = [c for c in creations if c.get("metadata", {}).get("whop_channel_id") == whop_channel_id]
+    if whop_campaign_id is not None:
+        creations = [c for c in creations if c.get("metadata", {}).get("whop_campaign_id") == whop_campaign_id]
     total = len(creations)
     page = creations[offset:offset + limit]
     return {"creations": page, "has_more": (offset + limit) < total, "total": total}
+
+
+@app.get("/api/campaigns")
+async def list_public_campaigns():
+    return admin_db.list_whop_campaigns()
+
 
 @app.get("/api/creations/{job_id}")
 async def get_creation(job_id: str):
@@ -2836,6 +2891,12 @@ async def admin_delete_user(user_id: int, x_admin_password: Optional[str] = Head
     return {"ok": True}
 
 
+@app.get("/api/admin/users/{user_id}/campaigns")
+async def admin_list_user_campaigns(user_id: int, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    _check_admin(x_admin_password)
+    return admin_db.list_user_campaigns(user_id)
+
+
 # --- Niches ---
 
 @app.get("/api/admin/niches")
@@ -2847,13 +2908,19 @@ async def admin_list_niches(x_admin_password: Optional[str] = Header(None, alias
 @app.post("/api/admin/niches")
 async def admin_create_niche(body: _NameBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     _check_admin(x_admin_password)
-    return admin_db.create_niche(body.name)
+    try:
+        return admin_db.create_niche(body.name)
+    except UniqueViolation:
+        raise HTTPException(400, f"Niche '{body.name}' already exists")
 
 
 @app.put("/api/admin/niches/{niche_id}")
 async def admin_update_niche(niche_id: int, body: _NameBody, x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     _check_admin(x_admin_password)
-    admin_db.update_niche(niche_id, body.name)
+    try:
+        admin_db.update_niche(niche_id, body.name)
+    except UniqueViolation:
+        raise HTTPException(400, f"Niche '{body.name}' already exists")
     return {"ok": True}
 
 
@@ -2878,7 +2945,10 @@ async def admin_create_youtube_channel(
     x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
 ):
     _check_admin(x_admin_password)
-    return admin_db.create_youtube_channel(body.name, body.username, body.url, body.niche_id)
+    try:
+        return admin_db.create_youtube_channel(body.name, body.username, body.url, body.niche_id)
+    except UniqueViolation:
+        raise HTTPException(400, f"YouTube channel with username '{body.username}' already exists")
 
 
 @app.put("/api/admin/youtube-channels/{channel_id}")
@@ -2887,7 +2957,10 @@ async def admin_update_youtube_channel(
     x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
 ):
     _check_admin(x_admin_password)
-    admin_db.update_youtube_channel(channel_id, body.name, body.username, body.url, body.niche_id)
+    try:
+        admin_db.update_youtube_channel(channel_id, body.name, body.username, body.url, body.niche_id)
+    except UniqueViolation:
+        raise HTTPException(400, f"YouTube channel with username '{body.username}' already exists")
     return {"ok": True}
 
 

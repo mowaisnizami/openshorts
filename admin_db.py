@@ -492,4 +492,18 @@ def set_user_niches(user_id: int, niche_ids: List[int]):
             conn.close()
 
 
+def list_user_campaigns(user_id: int) -> List[Dict]:
+    return _fetchall("""
+        SELECT DISTINCT wc.id, wc.name, wc.whop_channel_id, wc.created_at,
+               wch.name AS whop_channel_name
+        FROM whop_campaigns wc
+        JOIN whop_campaign_niches wcn ON wcn.campaign_id = wc.id
+        LEFT JOIN whop_channels wch ON wch.id = wc.whop_channel_id
+        WHERE wcn.niche_id IN (
+            SELECT un.niche_id FROM user_niches un WHERE un.user_id = %s
+        )
+        ORDER BY wc.name
+    """, (user_id,))
+
+
 

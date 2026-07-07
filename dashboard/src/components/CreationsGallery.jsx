@@ -401,7 +401,8 @@ export default function CreationsGallery({
   geminiApiKey = '',
   elevenLabsKey = '',
   uploadPostKey = '',
-  uploadUserId = ''
+  uploadUserId = '',
+  adminPassword = ''
 }) {
   const [creations, setCreations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -411,17 +412,39 @@ export default function CreationsGallery({
   const [offset, setOffset] = useState(0);
   const loaderRef = useRef(null);
 
+  // Filter state
+  const [filterUser, setFilterUser] = useState('');
+  const [filterCampaign, setFilterCampaign] = useState('');
+  const [filterUsers, setFilterUsers] = useState([]);
+  const [filterCampaigns, setFilterCampaigns] = useState([]);
+
+  // Fetch filter options
+  useEffect(() => {
+    fetch(getApiUrl('/api/campaigns'))
+      .then(r => r.ok ? r.json() : []).then(setFilterCampaigns).catch(() => {});
+    if (adminPassword) {
+      fetch(getApiUrl('/api/admin/users'), {
+        headers: { 'X-Admin-Password': adminPassword }
+      }).then(r => r.ok ? r.json() : []).then(setFilterUsers).catch(() => {});
+    }
+  }, [adminPassword]);
+
+  const buildFilterParams = () => {
+    const params = new URLSearchParams();
+    if (filterUser) params.set('user_id', filterUser);
+    if (filterCampaign) params.set('whop_campaign_id', filterCampaign);
+    return params.toString();
+  };
+
   const fetchCreations = useCallback(
     async (currentOffset = 0, append = false) => {
       try {
         if (currentOffset === 0) setLoading(true);
         else setLoadingMore(true);
 
-        const res = await fetch(
-          getApiUrl(
-            `/api/creations?limit=${ITEMS_PER_PAGE}&offset=${currentOffset}`
-          )
-        );
+        const filterStr = buildFilterParams();
+        const query = `/api/creations?limit=${ITEMS_PER_PAGE}&offset=${currentOffset}${filterStr ? '&' + filterStr : ''}`;
+        const res = await fetch(getApiUrl(query));
         if (!res.ok) throw new Error('Failed to fetch creations');
         const data = await res.json();
 
@@ -439,7 +462,7 @@ export default function CreationsGallery({
         setLoadingMore(false);
       }
     },
-    []
+    [filterUser, filterCampaign]
   );
 
   const handleNewClip = useCallback(async (jobId) => {
@@ -606,7 +629,7 @@ export default function CreationsGallery({
 
   return (
     <div className="h-full overflow-y-auto p-6 md:p-8 animate-[fadeIn_0.3s_ease-out]">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-3">
           <History className="text-primary" /> My Creations
         </h1>
@@ -615,6 +638,49 @@ export default function CreationsGallery({
           {hasMore ? '+' : ''}
         </span>
       </div>
+
+      {(adminPassword || filterCampaigns.length > 0) && (
+        <div className="flex gap-4 mb-6 flex-wrap">
+          {adminPassword && (
+            <div className="relative">
+              <select
+                value={filterUser}
+                onChange={e => { setFilterUser(e.target.value); setOffset(0); }}
+                className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl px-3 py-2 text-xs text-white appearance-none pr-8 focus:outline-none focus:border-primary/50"
+              >
+                <option value="">All Users</option>
+                {filterUsers.map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            </div>
+          )}
+          {filterCampaigns.length > 0 && (
+            <div className="relative">
+              <select
+                value={filterCampaign}
+                onChange={e => { setFilterCampaign(e.target.value); setOffset(0); }}
+                className="bg-zinc-800/80 border border-zinc-700/50 rounded-xl px-3 py-2 text-xs text-white appearance-none pr-8 focus:outline-none focus:border-primary/50"
+              >
+                <option value="">All Campaigns</option>
+                {filterCampaigns.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            </div>
+          )}
+          {(filterUser || filterCampaign) && (
+            <button
+              onClick={() => { setFilterUser(''); setFilterCampaign(''); setOffset(0); }}
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors px-2"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {creations.length === 0 ? (
         <div className="text-center py-20 text-zinc-500">
