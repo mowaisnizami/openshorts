@@ -1116,7 +1116,7 @@ async def _poll_remotion_render(render_id: str):
         shutil.copy2(output_path, final_path)
 
         new_clip = dict(job["clip_data"])
-        parent_clip_id = job["clip_data"].get("clip_id", job["clip_index"] + 1)
+        parent_clip_id = job["clip_data"].get("clip_id") or job["clip_index"] + 1
         base_id = str(parent_clip_id).split("-")[0]
         creation_id = admin_db._resolve_creation_id(job["job_id"])
         if creation_id:
