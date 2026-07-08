@@ -249,19 +249,6 @@ def delete_whop_campaign(campaign_id: int) -> bool:
 
 # --- Linkage: Whop Campaign ↔ Niches ---
 
-def get_whop_campaign(campaign_id: int) -> Optional[Dict]:
-    row = _fetchone("""
-        SELECT wc.id, wc.name, wc.whop_channel_id, wc.created_at,
-               wch.name AS whop_channel_name
-        FROM whop_campaigns wc
-        LEFT JOIN whop_channels wch ON wch.id = wc.whop_channel_id
-        WHERE wc.id = %s
-    """, (campaign_id,))
-    if not row:
-        return None
-    return dict(row)
-
-
 def get_whop_campaign_niches(campaign_id: int) -> List[int]:
     rows = _fetchall("SELECT niche_id FROM whop_campaign_niches WHERE campaign_id = %s", (campaign_id,))
     return [r["niche_id"] for r in rows]
@@ -629,15 +616,6 @@ def _build_creation_row(row: Dict) -> Dict:
     }
 
 
-def _resolve_creation_whop_campaign(creation: Dict):
-    meta = creation.get("metadata") or {}
-    campaign_id = meta.get("whop_campaign_id")
-    if campaign_id is not None:
-        campaign = get_whop_campaign(int(campaign_id))
-        if campaign:
-            meta["whop_campaign"] = campaign
-
-
 def _resolve_creation_id(job_id: str) -> Optional[int]:
     row = _fetchone("SELECT id FROM creations WHERE job_id = %s", (job_id,))
     return row["id"] if row else None
@@ -680,9 +658,7 @@ def create_creation(
             ))
             row = dict(cur.fetchone())
         conn.commit()
-        creation = _build_creation_row(row)
-        _resolve_creation_whop_campaign(creation)
-        return creation
+        return _build_creation_row(row)
     finally:
         conn.close()
 
@@ -704,7 +680,6 @@ def get_creation(job_id: str) -> Optional[Dict]:
             "details": row.get("details") or {},
         }
     creation["clips"] = get_clips(row["id"])
-    _resolve_creation_whop_campaign(creation)
     return creation
 
 
@@ -752,7 +727,6 @@ def get_creations(
     """, tuple(params + [limit, offset]))
 
     creations = []
-    campaign_ids = set()
     for row in rows:
         creation = _build_creation_row(row)
         if row.get("total_cost") is not None:
@@ -763,23 +737,6 @@ def get_creations(
             }
         creation["clips"] = get_clips(row["id"])
         creations.append(creation)
-        meta = creation.get("metadata") or {}
-        if meta.get("whop_campaign_id") is not None:
-            campaign_ids.add(int(meta["whop_campaign_id"]))
-
-    if campaign_ids:
-        campaigns = _fetchall("""
-            SELECT wc.id, wc.name, wc.whop_channel_id, wc.created_at,
-                   wch.name AS whop_channel_name
-            FROM whop_campaigns wc
-            LEFT JOIN whop_channels wch ON wch.id = wc.whop_channel_id
-            WHERE wc.id = ANY(%s)
-        """, (list(campaign_ids),))
-        campaign_map = {c["id"]: dict(c) for c in campaigns}
-        for creation in creations:
-            cid = creation.get("metadata", {}).get("whop_campaign_id")
-            if cid is not None and int(cid) in campaign_map:
-                creation["metadata"]["whop_campaign"] = campaign_map[int(cid)]
 
     return creations, total
 
