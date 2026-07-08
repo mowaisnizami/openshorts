@@ -252,7 +252,8 @@ function ActiveJobsSidebar({ children, recentJobIds, onSelectJob }) {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm text-zinc-200 truncate font-medium">
-                    {c.source?.split('/').pop()?.slice(0, 30) ||
+                    {c.original_video_title ||
+                      c.source?.split('/').pop()?.slice(0, 30) ||
                       c.job_id?.slice(0, 8)}
                   </span>
                   <span
