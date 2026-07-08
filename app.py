@@ -961,7 +961,7 @@ async def remotion_submit(req: RemotionSubtitleRequest):
     if creation_id:
         transcript = admin_db.get_transcript(creation_id)
 
-    clips = creation.get("shorts", [])
+    clips = creation.get("clips", [])
     if req.clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
 
