@@ -437,10 +437,12 @@ export default function CreationsGallery({
   };
 
   const fetchCreations = useCallback(
-    async (currentOffset = 0, append = false) => {
+    async (currentOffset = 0, append = false, skipLoading = false) => {
       try {
-        if (currentOffset === 0) setLoading(true);
-        else setLoadingMore(true);
+        if (!skipLoading) {
+          if (currentOffset === 0) setLoading(true);
+          else setLoadingMore(true);
+        }
 
         const filterStr = buildFilterParams();
         const query = `/api/creations?limit=${ITEMS_PER_PAGE}&offset=${currentOffset}${filterStr ? '&' + filterStr : ''}`;
@@ -578,7 +580,7 @@ export default function CreationsGallery({
     const hasProcessing = creations.some((c) => c.status === 'processing');
     if (!hasProcessing) return;
     const interval = setInterval(() => {
-      fetchCreations(0, false);
+      fetchCreations(0, false, true);
     }, 5000);
     return () => clearInterval(interval);
   }, [creations, fetchCreations]);
@@ -617,7 +619,7 @@ export default function CreationsGallery({
           onClick={() => {
             setError(null);
             setOffset(0);
-            fetchCreations(0, false);
+      fetchCreations(0, false, true);
           }}
           className="mt-4 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-white transition-colors"
         >
