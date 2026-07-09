@@ -208,6 +208,14 @@ function CreationCard({
             <span className="shrink-0 text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">
               {clipCount} clips
             </span>
+            {creation.metadata?.whop_campaign_id && (
+              <span className="text-[9px] text-cyan-400/70 truncate max-w-[140px] shrink-0">
+                {creation.metadata.whop_campaign_id.whop_channel_name}{creation.metadata.whop_campaign_id.whop_channel_name && creation.metadata.whop_campaign_id.name ? ' → ' : ''}{creation.metadata.whop_campaign_id.name || ''}
+                {creation.metadata.whop_campaign_id.niches?.length > 0 && (
+                  <span className="text-zinc-500"> ({creation.metadata.whop_campaign_id.niches.map(n => n.name).join(', ')})</span>
+                )}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <p className="text-[11px] text-zinc-500 truncate">

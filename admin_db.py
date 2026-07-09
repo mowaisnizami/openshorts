@@ -259,7 +259,16 @@ def get_whop_campaign(campaign_id: int) -> Optional[Dict]:
     """, (campaign_id,))
     if not row:
         return None
-    return dict(row)
+    result = dict(row)
+    niche_rows = _fetchall("""
+        SELECT n.id, n.name
+        FROM whop_campaign_niches wcn
+        JOIN niches n ON n.id = wcn.niche_id
+        WHERE wcn.campaign_id = %s
+        ORDER BY n.name
+    """, (campaign_id,))
+    result["niches"] = [dict(r) for r in niche_rows]
+    return result
 
 
 def get_whop_campaign_niches(campaign_id: int) -> List[int]:
@@ -775,6 +784,18 @@ def get_creations(
             WHERE wc.id = ANY(%s)
         """, (list(campaign_ids),))
         campaign_map = {c["id"]: dict(c) for c in campaigns}
+        niche_rows = _fetchall("""
+            SELECT wcn.campaign_id, n.id AS niche_id, n.name AS niche_name
+            FROM whop_campaign_niches wcn
+            JOIN niches n ON n.id = wcn.niche_id
+            WHERE wcn.campaign_id = ANY(%s)
+            ORDER BY n.name
+        """, (list(campaign_ids),))
+        niche_map: Dict[int, List[Dict]] = {}
+        for r in niche_rows:
+            niche_map.setdefault(r["campaign_id"], []).append({"id": r["niche_id"], "name": r["niche_name"]})
+        for c in campaigns:
+            c["niches"] = niche_map.get(c["id"], [])
         for creation in creations:
             cid = creation.get("metadata", {}).get("whop_campaign_id")
             if cid is not None and int(cid) in campaign_map:
@@ -909,6 +930,7 @@ def get_clips(creation_id: int) -> List[Dict]:
     result = []
     for r in rows:
         clip = {
+            "clip_index": r["clip_index"],
             "start": r["start_sec"],
             "end": r["end_sec"],
             "video_description_for_tiktok": r.get("video_description_for_tiktok", ""),

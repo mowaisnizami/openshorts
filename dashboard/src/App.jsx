@@ -265,6 +265,16 @@ function ActiveJobsSidebar({ children, recentJobIds, onSelectJob }) {
                 {c.clips?.length > 0 && (
                   <span className="text-[10px] text-zinc-500">
                     {c.clips.length} clip{c.clips.length !== 1 ? 's' : ''}
+                    {c.metadata?.whop_campaign_id && (
+                      <span className="ml-1.5 text-cyan-400/70">
+                        {c.metadata.whop_campaign_id.whop_channel_name}{c.metadata.whop_campaign_id.whop_channel_name && c.metadata.whop_campaign_id.name ? ' → ' : ''}{c.metadata.whop_campaign_id.name || ''}
+                        {c.metadata.whop_campaign_id.niches?.length > 0 && (
+                          <span className="text-zinc-500">
+                            {' '}({c.metadata.whop_campaign_id.niches.map(n => n.name).join(', ')})
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </span>
                 )}
                 {c.progress_pct !== undefined && c.status === 'processing' && (
